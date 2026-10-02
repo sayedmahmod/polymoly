@@ -12,6 +12,7 @@
   "cfg.skillsDir": "مجلد المهارات المشتركة (مجلد فرعي يحوي `SKILL.md` لكل مهارة). فارغ: `~/.polyagent/skills`. تستخدم جميع المزوّدات المجلد نفسه.",
   "cfg.skillsDisabled": "أسماء المهارات المثبّتة المعطّلة.",
   "cfg.defaultProvider": "معرّف المزوّد المحدد مسبقًا في محادثة جديدة.",
+  "cfg.defaultEffort": "مستوى جهد الاستدلال الافتراضي للمحادثات الجديدة عندما يدعم النموذج مستويات الجهد. تُرحَّل التثبيتات الحالية مرة واحدة إلى `high` للحفاظ على الإعداد السابق، بينما تستخدم التثبيتات الجديدة `medium`.",
   "cfg.fallbackOrder": "ترتيب تبديل النماذج عندما يبلغ مزوّد حدّه أثناء المحادثة. الإدخالات `provider` أو `provider/model`، مثلًا `[\"codex/gpt-5.6-sol\", \"anthropic-api/claude-opus-5\"]`. فارغ: يُختار تلقائيًا نموذج مكافئ من مزوّد آخر.",
   "cfg.claudePermission": "`--permission-mode` لأداة Claude CLI. ‏`acceptEdits` يسمح بتعديل الملفات دون سؤال، و`bypassPermissions` يسمح أيضًا بأوامر الطرفية دون سؤال. ‏`default` يحظر معظم الأدوات في الوضع دون واجهة.",
   "cfg.codexSandbox": "`--sandbox` لـ `codex exec`. ‏`workspace-write` يسمح بالكتابة داخل مساحة العمل.",

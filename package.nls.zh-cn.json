@@ -12,6 +12,7 @@
   "cfg.skillsDir": "共享技能所在文件夹（每个技能一个包含 `SKILL.md` 的子文件夹）。留空：`~/.polyagent/skills`。所有提供商使用同一文件夹。",
   "cfg.skillsDisabled": "已安装但被停用的技能名称。",
   "cfg.defaultProvider": "新对话中预先选中的提供商 ID。",
+  "cfg.defaultEffort": "新对话的默认推理强度（所选模型支持强度级别时）。现有安装会一次性迁移为 `high` 以保留之前的默认行为；新安装使用 `medium`。",
   "cfg.fallbackOrder": "当某个提供商在对话中途达到限额时的切换顺序。条目为 `provider` 或 `provider/model`，例如 `[\"codex/gpt-5.6-sol\", \"anthropic-api/claude-opus-5\"]`。留空：自动选择其他提供商的同级模型。",
   "cfg.claudePermission": "Claude CLI 的 `--permission-mode`。`acceptEdits` 允许无需确认修改文件，`bypassPermissions` 还允许无需确认执行 shell 命令。`default` 在无界面运行时会阻止大多数工具。",
   "cfg.codexSandbox": "`codex exec` 的 `--sandbox`。`workspace-write` 允许在工作区内写入。",

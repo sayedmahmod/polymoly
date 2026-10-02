@@ -192,6 +192,10 @@ export class ChatController {
   }
 }
 
+/**
+ * Applies an agent event to the conversation and assistant message.
+ * Updates the conversation state and message content based on the event type.
+ */
 function applyEvent(conversation: Conversation, assistant: ChatMessage, event: AgentEvent): void {
   switch (event.type) {
     case 'session':

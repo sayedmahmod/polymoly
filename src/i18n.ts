@@ -199,6 +199,7 @@ const M: Record<string, Row> = {
   'skills.installed': ['Installiert: {names}', 'Installed: {names}', 'Instalado: {names}', 'Installé : {names}', 'تم التثبيت: {names}', '已安装：{names}'],
   'skills.nothingNew': ['Nichts Neues gefunden.', 'Nothing new found.', 'No se encontró nada nuevo.', 'Rien de nouveau trouvé.', 'لم يُعثر على جديد.', '没有发现新内容。'],
   'skills.deleteQuestion': ['Skill „{name}“ löschen? Der Ordner wird entfernt.', 'Delete skill “{name}”? Its folder will be removed.', '¿Eliminar la skill «{name}»? Se borrará su carpeta.', 'Supprimer la skill « {name} » ? Son dossier sera supprimé.', 'حذف المهارة «{name}»؟ سيُزال مجلدها.', '删除技能“{name}”？其文件夹将被移除。'],
+  'skill.applySkill': ['Wende den Skill "{name}" an.', 'Apply the skill "{name}".', 'Aplicar la habilidad "{name}".', 'Appliquer la compétence "{name}".', 'تطبيق المهارة "{name}".', '应用技能“{name}”。'],
   'skills.dialogInstall': ['Skill installieren', 'Install skill', 'Instalar skill', 'Installer la skill', 'تثبيت المهارة', '安装技能'],
   'skills.allFiles': ['Alle Dateien', 'All files', 'Todos los archivos', 'Tous les fichiers', 'كل الملفات', '所有文件'],
 
@@ -317,16 +318,16 @@ const M: Record<string, Row> = {
   'modeldesc.opus': ['Starker Allrounder für komplexe Arbeit', 'Strong all-rounder for complex work', 'Todoterreno potente para trabajo complejo', 'Polyvalent et puissant pour le travail complexe', 'نموذج متكامل وقوي للأعمال المعقّدة', '适合复杂工作的全能型模型'],
   'modeldesc.sonnet': ['Schnell und sparsam für Routine', 'Fast and economical for routine work', 'Rápido y económico para tareas rutinarias', 'Rapide et économique pour les tâches courantes', 'سريع واقتصادي للمهام الروتينية', '快速经济，适合日常任务'],
   'modeldesc.claude-fable-5-1': ['Maximale Leistung für die schwersten Aufgaben · braucht Usage-Credits', 'Maximum capability for the hardest tasks · needs usage credits', 'Máxima capacidad para las tareas más difíciles · requiere créditos de uso', 'Capacité maximale pour les tâches les plus dures · nécessite des crédits d’utilisation', 'أقصى قدرة لأصعب المهام · يتطلب أرصدة استخدام', '为最难的任务提供最强能力 · 需要用量额度'],
-  'modeldesc.haiku': ['Am schnellsten für kurze Antworten', 'Quickest for short answers', 'El más rápido para respuestas cortas', 'Le plus rapide pour les réponses courtes', 'الأسرع للإجابات القصيرة', '简短回答最快']
+  'modeldesc.haiku': ['Am schnellsten für kurze Antworten', 'Quickest for short answers', 'El más rápido para respuestas cortas', 'Le plus rapide pour les réponses courtes', 'الأسرع للإجابات القصيرة', '简短回答最快'],
 };
 
 export function resolveLanguage(): Lang {
   const setting = vscode.workspace.getConfiguration('polyagent').get<string>('language', 'auto');
-  if ((LANGS as readonly string[]).includes(setting)) {
+  if (LANGS.includes(setting as Lang)) {
     return setting as Lang;
   }
   const ui = vscode.env.language.toLowerCase().slice(0, 2);
-  return (LANGS as readonly string[]).includes(ui) ? (ui as Lang) : 'en';
+  return LANGS.includes(ui as Lang) ? ui as Lang : 'en';
 }
 
 export function format(template: string, vars?: Record<string, string | number>): string {
@@ -342,7 +343,14 @@ export function t(key: string, vars?: Record<string, string | number>): string {
   return format(lookup(key, resolveLanguage()) ?? key, vars);
 }
 
-/** Translation when the key exists, else undefined; for optional overrides such as built-in descriptions. */
+/**
+ * Looks up a translation key and returns the translated string if it exists, 
+ * otherwise returns undefined. Use for optional text like built-in provider 
+ * descriptions that may not have translations.
+ * 
+ * @param key - The translation key to look up
+ * @returns The translated string if the key exists, undefined otherwise
+ */
 export function tOptional(key: string): string | undefined {
   return lookup(key, resolveLanguage());
 }

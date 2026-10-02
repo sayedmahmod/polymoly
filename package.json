@@ -159,6 +159,11 @@
           "default": "claude",
           "markdownDescription": "%cfg.defaultProvider%"
         },
+        "polyagent.defaultEffort": {
+          "type": "string",
+          "default": "medium",
+          "markdownDescription": "%cfg.defaultEffort%"
+        },
         "polyagent.fallbackOrder": {
           "type": "array",
           "default": [],

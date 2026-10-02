@@ -5,8 +5,11 @@ import { UsageService } from './usage/usageService';
 import { ChatViewProvider } from './views/chatViewProvider';
 import { UsagePanel } from './views/usagePanel';
 import { t } from './i18n';
+import { runMigrations } from './migrations';
 
-export function activate(context: vscode.ExtensionContext): void {
+export async function activate(context: vscode.ExtensionContext): Promise<void> {
+  await runMigrations(context);
+
   const store = new ConversationStore(context.globalState);
   const usagePanel = new UsagePanel(context, new UsageService(context.secrets, context.globalState));
   const chat = new ChatViewProvider(context, store, usagePanel);

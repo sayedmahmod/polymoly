@@ -36,9 +36,9 @@ function disabledSkills(): Set<string> {
   return new Set(vscode.workspace.getConfiguration('polyagent').get<string[]>('skills.disabled', []));
 }
 
-/** Reads `name` and `description` from the front matter; single-line and folded values. */
+/** Reads `name` and `description` from the front matter; supports single-line values. */
 export function parseFrontMatter(text: string): Record<string, string> {
-  const match = text.match(/^﻿?---\r?\n([\s\S]*?)\r?\n---/);
+  const match = text.match(/^\uFEFF?---\r?\n([\s\S]*?)\r?\n---/);
   const result: Record<string, string> = {};
   if (!match) {
     return result;
@@ -314,7 +314,7 @@ export function expandSkillInvocation(prompt: string, skills: SkillInfo[]): { pr
     return { prompt };
   }
   const body = fs.readFileSync(skill.file, 'utf8');
-  const rest = match[2]?.trim() || `Wende den Skill "${skill.name}" an.`;
+  const rest = match[2]?.trim() || t('skill.applySkill', { name: skill.name });
   return {
     skill: skill.name,
     prompt: `<skill name="${skill.name}" dir="${skill.dir}">\n${body.trim()}\n</skill>\n\n${rest}`

@@ -253,6 +253,7 @@ Placeholders: `{{start}}`, `{{end}}` (ISO 8601), `{{startUnix}}`, `{{endUnix}}` 
 | --- | --- | --- |
 | `polyagent.language` | `auto` | UI language: `auto`, `de`, `en`, `es`, `fr`, `ar`, `zh` |
 | `polyagent.defaultProvider` | `claude` | Provider preselected in new chats |
+| `polyagent.defaultEffort` | `medium` | Reasoning effort for new chats; existing installs are migrated once to `high` to preserve the old default |
 | `polyagent.providers` | `[]` | Custom providers and overrides |
 | `polyagent.mcpServers` | `{}` | MCP servers shared by all CLI providers |
 | `polyagent.skills.directory` | `""` | Skills folder, empty means `~/.polyagent/skills` |

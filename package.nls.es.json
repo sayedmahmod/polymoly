@@ -12,6 +12,7 @@
   "cfg.skillsDir": "Carpeta con las skills compartidas (una subcarpeta con `SKILL.md` por skill). Vacío: `~/.polyagent/skills`. Todos los proveedores usan la misma carpeta.",
   "cfg.skillsDisabled": "Nombres de las skills instaladas que están desactivadas.",
   "cfg.defaultProvider": "ID del proveedor preseleccionado en un chat nuevo.",
+  "cfg.defaultEffort": "Esfuerzo de razonamiento predeterminado para chats nuevos cuando el modelo admite niveles de esfuerzo. Las instalaciones existentes se migran una vez a `high` para conservar el valor anterior; las nuevas usan `medium`.",
   "cfg.fallbackOrder": "Orden para cambiar de modelo cuando un proveedor alcanza su límite en mitad del chat. Entradas `provider` o `provider/model`, p. ej. `[\"codex/gpt-5.6-sol\", \"anthropic-api/claude-opus-5\"]`. Vacío: se elige automáticamente un modelo equivalente de otro proveedor.",
   "cfg.claudePermission": "`--permission-mode` para la CLI de Claude. `acceptEdits` permite editar archivos sin preguntar; `bypassPermissions` permite además comandos de shell sin preguntar. `default` bloquea la mayoría de herramientas sin interfaz.",
   "cfg.codexSandbox": "`--sandbox` para `codex exec`. `workspace-write` permite escribir dentro del workspace.",

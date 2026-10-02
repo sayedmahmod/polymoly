@@ -48,7 +48,7 @@ export interface Conversation {
 const STORAGE_KEY = 'polyagent.conversations';
 const MAX_STORED = 100;
 
-export function newConversation(providerId: string, model?: string): Conversation {
+export function newConversation(providerId: string, model?: string, effort: EffortLevel = 'medium'): Conversation {
   const now = Date.now();
   return {
     id: `c_${now.toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
@@ -57,7 +57,7 @@ export function newConversation(providerId: string, model?: string): Conversatio
     model,
     messages: [],
     providerSessions: {},
-    effort: 'high',
+    effort,
     thinking: true,
     showTools: true,
     createdAt: now,
@@ -65,18 +65,50 @@ export function newConversation(providerId: string, model?: string): Conversatio
   };
 }
 
-/** Conversation list persisted in global state. */
+/**
+ * Manages conversation persistence in VS Code's global state.
+ * Stores conversation history, titles, and metadata with automatic cleanup
+ * to prevent excessive storage usage.
+ *
+ * @remarks
+ * Conversations are sorted by `updatedAt` descending and capped at
+ * `MAX_STORED` entries. Titles auto-derive from the first user message.
+ *
+ * @example
+ * ```typescript
+ * const store = new ConversationStore(context.globalState);
+ * const conversation = store.get('c_abc123_xyz456');
+ * await store.save(conversation);
+ * ```
+ */
 export class ConversationStore {
+  /**
+   * Creates a new ConversationStore instance.
+   * @param memento - VS Code Memento for persistent storage
+   */
   constructor(private readonly memento: vscode.Memento) {}
 
+  /**
+   * Retrieves all conversations from storage.
+   * @returns Array of all conversations, sorted by updatedAt descending
+   */
   all(): Conversation[] {
     return this.memento.get<Conversation[]>(STORAGE_KEY, []);
   }
 
+  /**
+   * Retrieves a conversation by its ID.
+   * @param id - The conversation ID to retrieve
+   * @returns The conversation if found, undefined otherwise
+   */
   get(id: string): Conversation | undefined {
     return this.all().find((c) => c.id === id);
   }
 
+  /**
+   * Saves a conversation, updating its timestamp and auto-generating title if needed.
+   * @param conversation - The conversation to save
+   */
   async save(conversation: Conversation): Promise<void> {
     conversation.updatedAt = Date.now();
     if (conversation.title === 'Untitled') {
@@ -92,6 +124,10 @@ export class ConversationStore {
     await this.memento.update(STORAGE_KEY, next);
   }
 
+  /**
+   * Removes a conversation by its ID.
+   * @param id - The conversation ID to remove
+   */
   async remove(id: string): Promise<void> {
     await this.memento.update(
       STORAGE_KEY,

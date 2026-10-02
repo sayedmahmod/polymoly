@@ -28,7 +28,7 @@ import {
   skillsRoot
 } from '../skills/skills';
 import { LimitsService } from '../usage/limits';
-import { Attachment, McpServerDef, ModelDef, ProviderDef } from '../types';
+import { Attachment, EffortLevel, McpServerDef, ModelDef, ProviderDef } from '../types';
 import { UsagePanel } from './usagePanel';
 
 const LIMITS_REFRESH_MS = 60_000;
@@ -66,7 +66,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     const defaultProvider = vscode.workspace
       .getConfiguration('polyagent')
       .get<string>('defaultProvider', 'claude');
-    this.conversation = newConversation(defaultProvider);
+    this.conversation = newConversation(defaultProvider, undefined, configuredDefaultEffort());
 
     context.subscriptions.push(
       vscode.workspace.onDidChangeConfiguration((event) => {
@@ -106,7 +106,11 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     this.controller.cancel();
     this.handoff = undefined;
     this.attachments = [];
-    this.conversation = newConversation(this.conversation.providerId, this.conversation.model);
+    this.conversation = newConversation(
+      this.conversation.providerId,
+      this.conversation.model,
+      configuredDefaultEffort()
+    );
     this.postState();
   }
 
@@ -909,6 +913,10 @@ ${webviewI18nScript(nonce)}
 </body>
 </html>`;
   }
+}
+
+function configuredDefaultEffort(): EffortLevel {
+  return vscode.workspace.getConfiguration('polyagent').get<EffortLevel>('defaultEffort', 'medium');
 }
 
 function normalizeMcp(raw: any): McpServerDef {

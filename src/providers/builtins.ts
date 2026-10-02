@@ -1,6 +1,7 @@
 import { ProviderDef } from '../types';
 
 const CLAUDE_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'];
+const CODEX_EFFORTS = ['low', 'medium', 'high', 'xhigh'];
 
 /**
  * Providers that ship with the extension. Users override any of these, or add new
@@ -42,7 +43,14 @@ export const BUILTIN_PROVIDERS: ProviderDef[] = [
         tier: 'frontier',
         contextWindow: 200_000
       },
-      { id: 'haiku', label: 'Haiku 4.5', description: 'Quickest for short answers', efforts: [], tier: 'fast', contextWindow: 200_000 }
+      {
+        id: 'haiku',
+        label: 'Haiku 4.5',
+        description: 'Quickest for short answers',
+        defaultEffort: 'high',
+        tier: 'fast',
+        contextWindow: 200_000
+      },
     ],
     usage: { kind: 'anthropic-admin' }
   },
@@ -56,10 +64,18 @@ export const BUILTIN_PROVIDERS: ProviderDef[] = [
     modelsFrom: 'codex-cache',
     defaultModel: 'gpt-5.6-sol',
     supportsThinking: true,
-    efforts: ['low', 'medium', 'high', 'xhigh'],
+    efforts: CODEX_EFFORTS,
     models: [
-      { id: 'gpt-5.6-sol', label: 'GPT-5.6-Sol', tier: 'flagship' },
-      { id: 'gpt-5.5', label: 'GPT-5.5', tier: 'balanced' }
+      {
+        id: 'gpt-5.6-sol',
+        label: 'GPT-5.6-Sol',
+        tier: 'flagship'
+      },
+      {
+        id: 'gpt-5.5',
+        label: 'GPT-5.5',
+        tier: 'balanced'
+      }
     ],
     usage: { kind: 'openai-admin' }
   },
@@ -73,7 +89,11 @@ export const BUILTIN_PROVIDERS: ProviderDef[] = [
     defaultModel: 'MiniMax-M2',
     maxTokens: 8192,
     models: [
-      { id: 'MiniMax-M2', label: 'MiniMax M2', pricing: { input: 0.3, output: 1.2 } }
+      {
+        id: 'MiniMax-M2',
+        label: 'MiniMax M2',
+        pricing: { input: 0.3, output: 1.2 }
+      }
     ],
     usage: { kind: 'minimax-token-plan' }
   },
@@ -88,9 +108,24 @@ export const BUILTIN_PROVIDERS: ProviderDef[] = [
     supportsThinking: true,
     maxTokens: 8192,
     models: [
-      { id: 'claude-opus-5', label: 'Opus 5', tier: 'flagship', contextWindow: 200_000 },
-      { id: 'claude-sonnet-5', label: 'Sonnet 5', tier: 'balanced', contextWindow: 200_000 },
-      { id: 'claude-haiku-4-5-20251001', label: 'Haiku 4.5', tier: 'fast', contextWindow: 200_000 }
+      {
+        id: 'claude-opus-5',
+        label: 'Opus 5',
+        tier: 'flagship',
+        contextWindow: 200_000
+      },
+      {
+        id: 'claude-sonnet-5',
+        label: 'Sonnet 5',
+        tier: 'balanced',
+        contextWindow: 200_000
+      },
+      {
+        id: 'claude-haiku-4-5-20251001',
+        label: 'Haiku 4.5',
+        tier: 'fast',
+        contextWindow: 200_000
+      }
     ],
     usage: { kind: 'anthropic-admin' }
   }

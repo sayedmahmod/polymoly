@@ -1,8 +1,8 @@
-/** Shared types for providers, streaming events and usage reporting. */
+/** Core types for AI provider adapters, streaming chat events, and usage tracking. */
 
 export type ProviderKind = 'cli' | 'http';
 
-/** Reasoning effort as the provider names it, e.g. low, medium, high, xhigh, max, ultra. */
+/** Reasoning effort level as the provider names it, e.g. low, medium, high, xhigh, max, ultra. */
 export type EffortLevel = string;
 
 /** Wire protocol spoken by a CLI provider on stdout. */

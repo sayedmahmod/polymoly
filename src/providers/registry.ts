@@ -17,7 +17,7 @@ export function loadProviders(): ProviderDef[] {
   }
 
   for (const raw of configured) {
-    if (!raw || typeof raw.id !== 'string' || !raw.id) {
+    if (!raw?.id) {
       continue;
     }
     const existing = byId.get(raw.id);
@@ -44,10 +44,20 @@ export function enabledProviders(): ProviderDef[] {
     });
 }
 
+/**
+ * Checks if a provider ID is defined in the built-in providers list.
+ * @param id - The provider ID to check
+ * @returns True if the provider is built-in, false otherwise
+ */
 export function isBuiltin(id: string): boolean {
   return BUILTIN_PROVIDERS.some((def) => def.id === id);
 }
 
+/**
+ * Resolves and deduplicates models for a provider, merging configured, fetched, and extra models.
+ * @param def - The provider definition to resolve models for
+ * @returns Provider definition with resolved models
+ */
 function resolveModels(def: ProviderDef): ProviderDef {
   let models = def.models ?? [];
   if (def.modelsFrom === 'codex-cache') {
@@ -67,6 +77,10 @@ function resolveModels(def: ProviderDef): ProviderDef {
   return { ...def, models: all };
 }
 
+/**
+ * Returns the codex CLI home directory path.
+ * @returns Path to codex home directory
+ */
 export function codexHome(): string {
   return process.env.CODEX_HOME || path.join(os.homedir(), '.codex');
 }
@@ -97,11 +111,20 @@ function readCodexModels(): ModelDef[] | undefined {
   }
 }
 
+/**
+ * Finds a provider by its ID from all loaded providers.
+ * @param id - The provider ID to find
+ * @returns Provider definition if found, undefined otherwise
+ */
 export function findProvider(id: string): ProviderDef | undefined {
   return loadProviders().find((p) => p.id === id);
 }
 
-/** Merges `patch` into the user's global override entry for provider `id`. */
+/**
+ * Merges `patch` into the user's global override entry for provider `id`.
+ * @param id - The provider ID to update
+ * @param patch - The partial provider definition to merge
+ */
 export async function updateProviderOverride(id: string, patch: Partial<ProviderDef>): Promise<void> {
   const config = vscode.workspace.getConfiguration('polyagent');
   const list = [...(config.inspect<Partial<ProviderDef>[]>('providers')?.globalValue ?? [])];
@@ -120,6 +143,10 @@ export async function updateProviderOverride(id: string, patch: Partial<Provider
   await config.update('providers', list, vscode.ConfigurationTarget.Global);
 }
 
+/**
+ * Removes a provider override from the user's global configuration.
+ * @param id - The provider ID to remove
+ */
 export async function removeProviderOverride(id: string): Promise<void> {
   const config = vscode.workspace.getConfiguration('polyagent');
   const list = (config.inspect<Partial<ProviderDef>[]>('providers')?.globalValue ?? []).filter(
@@ -128,6 +155,10 @@ export async function removeProviderOverride(id: string): Promise<void> {
   await config.update('providers', list, vscode.ConfigurationTarget.Global);
 }
 
+/**
+ * Loads MCP server configurations from the polyagent.mcpServers setting.
+ * @returns Record of MCP server names to their definitions
+ */
 export function loadMcpServers(): Record<string, McpServerDef> {
   return vscode.workspace.getConfiguration('polyagent').get<Record<string, McpServerDef>>('mcpServers', {});
 }
@@ -137,12 +168,20 @@ export function activeMcpServers(): Record<string, McpServerDef> {
   return Object.fromEntries(Object.entries(loadMcpServers()).filter(([, server]) => !server.disabled));
 }
 
-/** Secret storage key for a provider's request API key. */
+/**
+ * Gets the secret storage key for a provider's request API key.
+ * @param providerId - The provider identifier
+ * @returns The secret key name
+ */
 export function apiKeySecret(providerId: string): string {
   return `polyagent.apiKey.${providerId}`;
 }
 
-/** Secret storage key for a provider's usage/admin key. */
+/**
+ * Gets the secret storage key for a provider's usage/admin key.
+ * @param providerId - The provider identifier
+ * @returns The secret key name
+ */
 export function adminKeySecret(providerId: string): string {
   return `polyagent.adminKey.${providerId}`;
 }
