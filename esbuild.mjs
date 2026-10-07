@@ -3,7 +3,7 @@ import * as esbuild from 'esbuild';
 const production = process.argv.includes('--production');
 const watch = process.argv.includes('--watch');
 
-const ctx = await esbuild.context({
+const extensionContext = await esbuild.context({
   entryPoints: ['src/extension.ts'],
   bundle: true,
   format: 'cjs',
@@ -16,9 +16,21 @@ const ctx = await esbuild.context({
   logLevel: 'info'
 });
 
+const webviewContext = await esbuild.context({
+  entryPoints: ['src/webview/main.ts'],
+  bundle: true,
+  format: 'iife',
+  platform: 'browser',
+  target: 'es2020',
+  outfile: 'dist/webview.js',
+  sourcemap: !production,
+  minify: production,
+  logLevel: 'info'
+});
+
 if (watch) {
-  await ctx.watch();
+  await Promise.all([extensionContext.watch(), webviewContext.watch()]);
 } else {
-  await ctx.rebuild();
-  await ctx.dispose();
+  await Promise.all([extensionContext.rebuild(), webviewContext.rebuild()]);
+  await Promise.all([extensionContext.dispose(), webviewContext.dispose()]);
 }

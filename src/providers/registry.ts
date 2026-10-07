@@ -4,6 +4,7 @@ import * as path from 'node:path';
 import * as vscode from 'vscode';
 import { McpServerDef, ModelDef, ProviderDef } from '../types';
 import { BUILTIN_PROVIDERS } from './builtins';
+import { resolvedAlias } from './modelAliases';
 
 /** Reads the built-in providers plus the user's `polyagent.providers` overrides, disabled ones included. */
 export function loadProviders(): ProviderDef[] {
@@ -62,7 +63,8 @@ function resolveModels(def: ProviderDef): ProviderDef {
       continue;
     }
     seen.add(model.id);
-    all.push({ ...model, efforts: model.efforts ?? def.efforts ?? [] });
+    const alias = def.kind === 'cli' ? resolvedAlias(def.id, model.id) : undefined;
+    all.push({ ...model, ...(alias ? { label: alias.label } : {}), efforts: model.efforts ?? def.efforts ?? [] });
   }
   return { ...def, models: all };
 }
@@ -135,6 +137,11 @@ export function loadMcpServers(): Record<string, McpServerDef> {
 /** Shared MCP servers that are switched on. */
 export function activeMcpServers(): Record<string, McpServerDef> {
   return Object.fromEntries(Object.entries(loadMcpServers()).filter(([, server]) => !server.disabled));
+}
+
+/** True when a request needs the provider's stored API key; other CLI providers log in themselves. */
+export function needsApiKey(def: ProviderDef): boolean {
+  return def.kind === 'http' || Boolean(def.apiKeyEnv);
 }
 
 /** Secret storage key for a provider's request API key. */

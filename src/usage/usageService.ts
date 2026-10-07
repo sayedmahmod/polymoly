@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import { ProviderDef, UsageBucket, UsageReport, UsageSourceDef } from '../types';
 import { adminKeySecret, apiKeySecret, loadProviders } from '../providers/registry';
 import { readRateLimits } from '../chat/controller';
-import { fetchMiniMaxRemains, MINIMAX_UNLIMITED, miniMaxUsedPercent } from './limits';
+import { fetchMiniMaxRemains, fetchZaiQuota, MINIMAX_UNLIMITED, miniMaxUsedPercent, zaiQuotaBase, zaiUsedPercent, zaiWindowKind } from './limits';
 import { t } from '../i18n';
 
 function emptyBucket(date = ''): UsageBucket {
@@ -56,7 +56,9 @@ export class UsageService {
   }
 
   private async fetchOne(def: ProviderDef, from: Date, to: Date): Promise<UsageReport> {
-    const source = def.usage ?? { kind: 'none' };
+    // A custom provider pointed at Z.ai gets the Coding Plan quota without extra setup.
+    const source: UsageSourceDef =
+      (!def.usage || def.usage.kind === 'none') && zaiQuotaBase(def) ? { kind: 'zai-coding-plan' } : def.usage ?? { kind: 'none' };
     const report = baseReport(def, source, from, to);
     report.rateLimit = readRateLimits(this.globalState)[def.id];
 
@@ -66,7 +68,7 @@ export class UsageService {
     }
 
     let key = await this.secrets.get(adminKeySecret(def.id));
-    if (!key && source.kind === 'minimax-token-plan') {
+    if (!key && (source.kind === 'minimax-token-plan' || source.kind === 'zai-coding-plan')) {
       // A Token Plan key (sk-cp-…) serves both chat and quota, so the request key is enough.
       key = await this.secrets.get(apiKeySecret(def.id));
     }
@@ -82,6 +84,8 @@ export class UsageService {
         await fetchOpenAiUsage(report, source, key!, from, to);
       } else if (source.kind === 'minimax-token-plan') {
         await fetchMiniMaxTokenPlan(report, source, key!);
+      } else if (source.kind === 'zai-coding-plan') {
+        await fetchZaiCodingPlan(report, zaiQuotaBase({ ...def, usage: source })!, key!);
       } else {
         await fetchCustomUsage(report, source, key, from, to);
       }
@@ -324,6 +328,31 @@ async function fetchMiniMaxTokenPlan(
   };
   report.hint =
     t('usage.minimaxHint');
+}
+
+/** Z.ai GLM Coding Plan: 5-hour and weekly token windows plus the monthly MCP tool calls. */
+async function fetchZaiCodingPlan(report: UsageReport, base: string, key: string): Promise<void> {
+  const data = await fetchZaiQuota(key, base);
+  const windows: { name: string; utilization: number; resetsAt?: number }[] = [];
+  for (const entry of data.limits) {
+    const kind = zaiWindowKind(entry);
+    const name = kind === 'session' ? '5 h' : kind === 'weekly' ? t('usage.week') : entry?.type === 'TIME_LIMIT' ? 'MCP' : undefined;
+    if (!name) {
+      continue;
+    }
+    const resetsAt = Number(entry.nextResetTime);
+    windows.push({
+      name,
+      utilization: zaiUsedPercent(entry) / 100,
+      resetsAt: Number.isFinite(resetsAt) && resetsAt > 0 ? Math.floor(resetsAt / 1000) : undefined
+    });
+  }
+  report.plan = data.level ? `GLM Coding ${String(data.level).replace(/^./, (c) => c.toUpperCase())}` : 'GLM Coding Plan';
+  report.rateLimit = {
+    status: windows.some((entry) => entry.utilization >= 1) ? 'exhausted' : 'ok',
+    windows,
+    observedAt: new Date().toISOString()
+  };
 }
 
 /** Any other provider: one configurable request plus dotted paths into the response. */

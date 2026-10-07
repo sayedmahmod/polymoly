@@ -4,3 +4,4 @@ out/
 *.vsix
 ._*
 .DS_Store
+.polymoly/

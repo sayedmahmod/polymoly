@@ -7,5 +7,6 @@ tsconfig.json
 **/*.map
 **/._*
 docs/**
+.polymoly/**
 *.vsix
 .gitignore

@@ -20,7 +20,7 @@ interface RawEntry {
 /**
  * Subscription usage windows per provider. Only providers whose CLI exposes them report
  * anything: Claude through the `rate_limit_event` its CLI prints during a chat, Codex through
- * its session logs, MiniMax through its Token Plan quota endpoint. CLI credentials are never read.
+ * its session logs, MiniMax and Z.ai through their plan quota endpoints. CLI credentials are never read.
  */
 export class LimitsService {
   /** Raw answer per provider. */
@@ -34,6 +34,11 @@ export class LimitsService {
   async get(def: ProviderDef, model: string | undefined, force = false): Promise<ProviderLimits | undefined> {
     if (def.usage?.kind === 'minimax-token-plan') {
       return this.miniMax(def, def.usage.baseUrl, force);
+    }
+    // Before the claude check: the claude CLI against Z.ai prints no rate-limit events.
+    const zaiBase = zaiQuotaBase(def);
+    if (zaiBase) {
+      return this.zai(def, zaiBase, force);
     }
     const isClaude = def.kind === 'cli' && def.protocol === 'claude-stream-json';
     const isCodex = def.kind === 'cli' && def.protocol === 'codex-jsonl';
@@ -57,6 +62,16 @@ export class LimitsService {
     }
     const entry = await this.raw(def.id, () => fetchMiniMaxRemains(key, baseUrl), force);
     const windows = entry.data ? miniMaxWindows(entry.data) : [];
+    return windows.length ? { providerId: def.id, windows, fetchedAt: entry.dataAt ?? Date.now() } : undefined;
+  }
+
+  private async zai(def: ProviderDef, base: string, force: boolean): Promise<ProviderLimits | undefined> {
+    const key = (await this.secrets.get(apiKeySecret(def.id))) ?? (await this.secrets.get(adminKeySecret(def.id)));
+    if (!key) {
+      return undefined;
+    }
+    const entry = await this.raw(def.id, () => fetchZaiQuota(key, base), force);
+    const windows = entry.data ? zaiWindows(entry.data) : [];
     return windows.length ? { providerId: def.id, windows, fetchedAt: entry.dataAt ?? Date.now() } : undefined;
   }
 
@@ -165,6 +180,101 @@ function miniMaxWindows(data: any): LimitWindow[] {
   add('session', group.current_interval_remaining_percent, group.current_interval_status, group.end_time);
   add('weekly', group.current_weekly_remaining_percent, group.current_weekly_status, group.weekly_end_time);
   return windows;
+}
+
+/**
+ * Quota host of a Z.ai / Zhipu GLM Coding Plan provider: the configured one, or the one its
+ * base URL (HTTP) or ANTHROPIC_BASE_URL (claude CLI) points at. Undefined for other providers.
+ */
+export function zaiQuotaBase(def: ProviderDef): string | undefined {
+  const usage = def.usage;
+  if (usage && usage.kind !== 'none' && usage.kind !== 'zai-coding-plan') {
+    return undefined;
+  }
+  if (usage?.kind === 'zai-coding-plan' && usage.baseUrl) {
+    return usage.baseUrl.replace(/\/+$/, '');
+  }
+  let host = '';
+  try {
+    host = new URL(def.baseUrl ?? def.env?.ANTHROPIC_BASE_URL ?? '').hostname;
+  } catch {
+    /* no URL */
+  }
+  if (/(^|\.)bigmodel\.cn$/i.test(host)) {
+    return 'https://open.bigmodel.cn';
+  }
+  if (/(^|\.)z\.ai$/i.test(host) || usage?.kind === 'zai-coding-plan') {
+    return 'https://api.z.ai';
+  }
+  return undefined;
+}
+
+/**
+ * Z.ai Coding Plan quota: GET /api/monitor/usage/quota/limit with the chat key. Returns the
+ * `data` object: `limits` holds TOKENS_LIMIT entries (unit 3 = 5 h, unit 6 = week) and a
+ * TIME_LIMIT entry for the monthly MCP tool calls.
+ */
+export async function fetchZaiQuota(key: string, base: string): Promise<any> {
+  const url = `${base}/api/monitor/usage/quota/limit`;
+  let json: any;
+  // Documented with a bearer token; some accounts only take the bare key. A bad key comes back
+  // as HTTP 200 with `code: 401` in the body.
+  for (const authorization of [`Bearer ${key}`, key]) {
+    const response = await fetch(url, { headers: { authorization, accept: 'application/json' }, signal: AbortSignal.timeout(8000) });
+    if (!response.ok && response.status !== 401) {
+      const body = await response.text().catch(() => '');
+      throw new Error(`HTTP ${response.status} ${response.statusText}${body ? `: ${body.slice(0, 400)}` : ''}`);
+    }
+    json = await response.json().catch(() => undefined);
+    if (response.status !== 401 && Number(json?.code) !== 401) {
+      break;
+    }
+  }
+  if (json?.success === false || (json?.code !== undefined && Number(json.code) !== 0 && Number(json.code) !== 200)) {
+    throw new Error(`Z.ai: ${json?.msg ?? json?.message ?? json?.code}`);
+  }
+  const data = json?.data ?? json;
+  if (!Array.isArray(data?.limits)) {
+    throw new Error(t('err.zaiQuota'));
+  }
+  return data;
+}
+
+/** Used share of one Z.ai limit entry, 0..100. */
+export function zaiUsedPercent(entry: any): number {
+  const percent = Number(entry?.percentage);
+  if (Number.isFinite(percent)) {
+    return Math.min(100, Math.max(0, percent));
+  }
+  const total = Number(entry?.usage);
+  const used = Number(entry?.currentValue);
+  return total > 0 && Number.isFinite(used) ? Math.min(100, Math.max(0, (used / total) * 100)) : 0;
+}
+
+/** Window kind of a Z.ai TOKENS_LIMIT entry: unit 3 is the 5-hour window, unit 6 the week. */
+export function zaiWindowKind(entry: any): LimitWindow['kind'] | undefined {
+  if (entry?.type !== 'TOKENS_LIMIT') {
+    return undefined;
+  }
+  const unit = Number(entry.unit);
+  return unit === 3 ? 'session' : unit === 6 ? 'weekly' : undefined;
+}
+
+function zaiWindows(data: any): LimitWindow[] {
+  const windows: LimitWindow[] = [];
+  for (const entry of data?.limits ?? []) {
+    const kind = zaiWindowKind(entry);
+    if (!kind) {
+      continue;
+    }
+    const resetsAt = Number(entry.nextResetTime);
+    windows.push({
+      kind,
+      usedPercent: zaiUsedPercent(entry),
+      resetsAt: Number.isFinite(resetsAt) && resetsAt > 0 ? resetsAt : undefined
+    });
+  }
+  return windows.sort((a, b) => (a.kind === b.kind ? 0 : a.kind === 'session' ? -1 : 1));
 }
 
 /** Newest `rate_limits` block the codex CLI wrote into its session logs. */

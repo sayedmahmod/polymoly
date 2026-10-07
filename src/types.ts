@@ -42,6 +42,8 @@ export type UsageSourceDef =
   | { kind: 'openai-admin'; baseUrl?: string }
   /** MiniMax Token Plan quota (sk-cp-… key): 5h and weekly windows per model group. */
   | { kind: 'minimax-token-plan'; baseUrl?: string }
+  /** Z.ai / Zhipu GLM Coding Plan quota: 5h and weekly token windows. Found from the base URL when missing. */
+  | { kind: 'zai-coding-plan'; baseUrl?: string }
   | {
       kind: 'custom-http';
       /** {{start}} / {{end}} (ISO) and {{startUnix}} / {{endUnix}} are substituted. */
@@ -87,10 +89,17 @@ export interface ProviderDef {
 
   // --- kind: 'cli' ---
   command?: string;
+  /** Arguments placed before the generated ones, e.g. the script an Electron binary runs. */
+  commandArgs?: string[];
   protocol?: CliProtocol;
   /** Extra arguments appended to the generated argument list. */
   extraArgs?: string[];
   env?: Record<string, string>;
+  /**
+   * Env var that receives the provider's stored API key, e.g. ANTHROPIC_AUTH_TOKEN to point
+   * the claude CLI at an Anthropic-compatible endpoint. Set: a stored key is required.
+   */
+  apiKeyEnv?: string;
 
   // --- kind: 'http' ---
   baseUrl?: string;
@@ -165,6 +174,14 @@ export interface Attachment {
   size: number;
 }
 
+/** Local tool execution for HTTP providers, which have no agent runtime of their own. */
+export interface LocalToolsRequest {
+  /** readonly: reading tools only; edit: no shell; write: shell commands confirmed; auto: everything. */
+  mode: 'readonly' | 'edit' | 'write' | 'auto';
+  /** Asked before a confirmed tool call runs; false denies it. */
+  confirm: (toolName: string, input: unknown) => Promise<boolean>;
+}
+
 export interface SendRequest {
   prompt: string;
   model?: string;
@@ -177,6 +194,13 @@ export interface SendRequest {
   effort?: EffortLevel;
   /** Extended thinking, forwarded only to providers that support it. */
   thinking?: boolean;
+  /**
+   * Per-chat override of the CLI's permission mode: Claude's `--permission-mode`
+   * (`plan` | `manual` | `dontAsk` | `acceptEdits` | `auto` | `bypassPermissions`) or Codex's
+   * `--sandbox` (`read-only` | `workspace-write` | `danger-full-access`). The adapters translate
+   * a value of the other protocol. Missing: the provider's own setting.
+   */
+  permission?: string;
   /** Files for this prompt that the model can take. */
   attachments?: Attachment[];
   /** Shared MCP servers, loaded by CLI providers that support MCP. */
@@ -185,6 +209,8 @@ export interface SendRequest {
   instructions?: string;
   /** Skill store folder the agent may read from. */
   skillsDir?: string;
+  /** Local file/shell tools for HTTP providers; CLI agents bring their own. */
+  localTools?: LocalToolsRequest;
   signal: AbortSignal;
 }
 

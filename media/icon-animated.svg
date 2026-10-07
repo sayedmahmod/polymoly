@@ -1,0 +1,291 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="24" height="24" viewBox="71 82 1110 1110" overflow="visible">
+<defs>
+<style>
+  .v { transform-box: view-box; }
+  .star-c { transform-origin: 626.5px 699px; }
+  .halo-c { transform-origin: 626.5px 196.6px; }
+
+  /* 1. Warp-Streifen schießen in die Mitte */
+  .streak { stroke-width: 12; stroke-linecap: round; opacity: 0;
+    animation: warp .75s cubic-bezier(.55,0,1,.45) both; }
+  @keyframes warp {
+    0%   { opacity: 0; transform: translate(var(--x), var(--y)); }
+    25%  { opacity: 1; }
+    100% { opacity: 0; transform: translate(0, 0); }
+  }
+
+  /* 2. Umriss zeichnet sich */
+  .trace { fill: none; stroke: url(#starGradient); stroke-width: 10; stroke-linecap: round;
+    stroke-dasharray: 1 1; opacity: 0;
+    animation: trace .85s cubic-bezier(.6,.1,.4,1) .05s both, fadeOut .35s ease-out .85s forwards; }
+  @keyframes trace { 0% { stroke-dashoffset: 1; opacity: 1; } 100% { stroke-dashoffset: 0; opacity: 1; } }
+  @keyframes fadeOut { from { opacity: 1; } to { opacity: 0; } }
+
+  /* 3. Blitz + Stern zündet */
+  .flash { opacity: 0; animation: flash .7s ease-out .8s both; }
+  @keyframes flash {
+    0%   { opacity: 0; transform: scale(.2); }
+    20%  { opacity: 1; transform: scale(1); }
+    100% { opacity: 0; transform: scale(1.5); }
+  }
+  .ignite { animation: ignite .75s cubic-bezier(.2,1.4,.4,1) .8s both; }
+  @keyframes ignite {
+    0%   { opacity: 0; transform: scale(.55); filter: brightness(3); }
+    40%  { opacity: 1; filter: brightness(2); }
+    100% { opacity: 1; transform: scale(1); filter: brightness(1); }
+  }
+
+  /* Loop: Stern atmet, macht ab und zu eine schnelle Pirouette */
+  .spin { animation: spin 7s linear 4s infinite; }
+  @keyframes spin {
+    0%   { transform: rotate(0); animation-timing-function: cubic-bezier(.7,0,.3,1); }
+    11%  { transform: rotate(376deg); animation-timing-function: ease-out; }
+    15%  { transform: rotate(360deg); }
+    100% { transform: rotate(360deg); }
+  }
+  .breathe { animation: breathe 3.5s ease-in-out 1.6s infinite; }
+  @keyframes breathe { 0%,100% { transform: scale(1); } 50% { transform: scale(1.03); } }
+  .glow { opacity: 0; animation: glowIn .6s ease-out 1s forwards, glowPulse 3.5s ease-in-out 1.6s infinite; }
+  @keyframes glowIn { to { opacity: .6; } }
+  @keyframes glowPulse { 0%,100% { opacity: .55; } 50% { opacity: 1; } }
+
+  /* Echo-Wellen in Sternform */
+  .echo { fill: none; stroke: url(#starGradient); stroke-width: 9; opacity: 0;
+    animation: echo 3.5s cubic-bezier(.1,.6,.3,1) 2.2s infinite; }
+  .echo.e2 { animation-delay: 2.45s; }
+  @keyframes echo {
+    0%   { opacity: 0; transform: scale(1); }
+    3%   { opacity: .9; }
+    45%  { opacity: 0; transform: scale(1.3); }
+    100% { opacity: 0; transform: scale(1.3); }
+  }
+
+  /* Lichtstrahlen */
+  .rays { opacity: 0; animation: raysIn 1s ease-out .85s forwards; }
+  @keyframes raysIn { to { opacity: 1; } }
+
+  /* 4. Heiligenschein wirbelt wie eine Münze rein und landet */
+  .halo-in { animation: haloIn 1.15s linear .95s both; }
+  @keyframes haloIn {
+    0%   { opacity: 0; transform: translateY(-320px) scale(.2, .2); animation-timing-function: ease-in; }
+    15%  { opacity: 1; }
+    35%  { transform: translateY(-190px) scale(-.75, .55); animation-timing-function: linear; }
+    55%  { transform: translateY(-70px) scale(.95, .85); animation-timing-function: ease-in; }
+    72%  { transform: translateY(20px) scale(1.12, .82); animation-timing-function: ease-out; }
+    86%  { transform: translateY(-8px) scale(.97, 1.05); }
+    100% { opacity: 1; transform: translateY(0) scale(1); }
+  }
+  .halo-float { animation: hover 4s ease-in-out 2.1s infinite; }
+  @keyframes hover {
+    0%,100% { transform: translateY(0) rotate(0); }
+    25%     { transform: translateY(-10px) rotate(-2deg); }
+    75%     { transform: translateY(8px) rotate(2deg); }
+  }
+  .comets { opacity: 0; animation: raysIn .6s ease-out 2s forwards; }
+
+  /* Funken */
+  .spark { transform-box: fill-box; transform-origin: center; opacity: 0;
+    animation: twinkle 2.8s ease-in-out infinite; }
+  @keyframes twinkle {
+    0%,100% { opacity: 0; transform: scale(0) rotate(0); }
+    40%     { opacity: 1; transform: scale(1.1) rotate(90deg); }
+    55%     { opacity: 1; transform: scale(1) rotate(120deg); }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    * { animation: none !important; }
+    .glow { opacity: .6; }
+    .comets, .spark, .shine, .rays, .streak, .trace, .flash, .echo, .burst, .ripple { display: none; }
+  }
+</style>
+
+<linearGradient id="haloGradient" gradientUnits="userSpaceOnUse" x1="310.894" y1="54.819" x2="973.411" y2="171.639">
+      <stop offset="0.0000%" stop-color="#EC5DFC"/>
+      <stop offset="4.1667%" stop-color="#DF5AFC"/>
+      <stop offset="8.3333%" stop-color="#CB53FC"/>
+      <stop offset="12.5000%" stop-color="#B94AFC"/>
+      <stop offset="16.6667%" stop-color="#A642FC"/>
+      <stop offset="20.8333%" stop-color="#933DFC"/>
+      <stop offset="25.0000%" stop-color="#843AFC"/>
+      <stop offset="29.1667%" stop-color="#7838FC"/>
+      <stop offset="33.3333%" stop-color="#6D39FC"/>
+      <stop offset="37.5000%" stop-color="#613CFC"/>
+      <stop offset="41.6667%" stop-color="#5640FC"/>
+      <stop offset="45.8333%" stop-color="#4C45FC"/>
+      <stop offset="50.0000%" stop-color="#4649FC"/>
+      <stop offset="54.1667%" stop-color="#3D52FD"/>
+      <stop offset="58.3333%" stop-color="#325CFD"/>
+      <stop offset="62.5000%" stop-color="#2C67FD"/>
+      <stop offset="66.6667%" stop-color="#2772FD"/>
+      <stop offset="70.8333%" stop-color="#2481FD"/>
+      <stop offset="75.0000%" stop-color="#2491FD"/>
+      <stop offset="79.1667%" stop-color="#26A2FD"/>
+      <stop offset="83.3333%" stop-color="#2AB4FD"/>
+      <stop offset="87.5000%" stop-color="#31C7FD"/>
+      <stop offset="91.6667%" stop-color="#3BD8FC"/>
+      <stop offset="95.8333%" stop-color="#43E6FC"/>
+      <stop offset="100.0000%" stop-color="#43EEFC"/>
+    
+  <animateTransform attributeName="gradientTransform" type="rotate" from="0 626.5 196.6" to="360 626.5 196.6" dur="5s" repeatCount="indefinite"/>
+</linearGradient>
+<linearGradient id="starGradient" gradientUnits="userSpaceOnUse" x1="433.225" y1="403.989" x2="948.277" y2="884.282">
+      <stop offset="0.0000%" stop-color="#DE55FC"/>
+      <stop offset="4.1667%" stop-color="#DA55FC"/>
+      <stop offset="8.3333%" stop-color="#D55EFC"/>
+      <stop offset="12.5000%" stop-color="#CE6BFC"/>
+      <stop offset="16.6667%" stop-color="#C76BFB"/>
+      <stop offset="20.8333%" stop-color="#C26AFB"/>
+      <stop offset="25.0000%" stop-color="#B269FB"/>
+      <stop offset="29.1667%" stop-color="#9D65FB"/>
+      <stop offset="33.3333%" stop-color="#8963FB"/>
+      <stop offset="37.5000%" stop-color="#7661FC"/>
+      <stop offset="41.6667%" stop-color="#6561FC"/>
+      <stop offset="45.8333%" stop-color="#5665FC"/>
+      <stop offset="50.0000%" stop-color="#4A6AFB"/>
+      <stop offset="54.1667%" stop-color="#4173FC"/>
+      <stop offset="58.3333%" stop-color="#3B80FC"/>
+      <stop offset="62.5000%" stop-color="#378EFC"/>
+      <stop offset="66.6667%" stop-color="#359EFC"/>
+      <stop offset="70.8333%" stop-color="#34AEFC"/>
+      <stop offset="75.0000%" stop-color="#36BFFC"/>
+      <stop offset="79.1667%" stop-color="#3ACEFC"/>
+      <stop offset="83.3333%" stop-color="#42DDFC"/>
+      <stop offset="87.5000%" stop-color="#44E6FC"/>
+      <stop offset="91.6667%" stop-color="#43ECFC"/>
+      <stop offset="95.8333%" stop-color="#35F0FC"/>
+      <stop offset="100.0000%" stop-color="#30F1FC"/>
+    
+  <animateTransform attributeName="gradientTransform" type="rotate" from="0 626.5 699" to="-360 626.5 699" dur="8s" repeatCount="indefinite"/>
+</linearGradient>
+
+<linearGradient id="shine" x1="0" y1="0" x2="1" y2="1">
+  <stop offset="0" stop-color="#fff" stop-opacity="0"/>
+  <stop offset=".44" stop-color="#fff" stop-opacity="0"/>
+  <stop offset=".5" stop-color="#fff" stop-opacity=".7"/>
+  <stop offset=".56" stop-color="#fff" stop-opacity="0"/>
+  <stop offset="1" stop-color="#fff" stop-opacity="0"/>
+  <animateTransform attributeName="gradientTransform" type="translate" values="-1 -1; -1 -1; 1 1; 1 1" keyTimes="0; .55; .8; 1" dur="3.5s" begin="1.3s" repeatCount="indefinite"/>
+</linearGradient>
+
+<radialGradient id="comet">
+  <stop offset="0" stop-color="#fff"/>
+  <stop offset=".3" stop-color="#E6FBFF"/>
+  <stop offset=".6" stop-color="#43E6FC" stop-opacity=".5"/>
+  <stop offset="1" stop-color="#43E6FC" stop-opacity="0"/>
+</radialGradient>
+<radialGradient id="flashGrad">
+  <stop offset="0" stop-color="#fff"/>
+  <stop offset=".35" stop-color="#F2DDFF" stop-opacity=".9"/>
+  <stop offset=".7" stop-color="#9B6BFF" stop-opacity=".35"/>
+  <stop offset="1" stop-color="#9B6BFF" stop-opacity="0"/>
+</radialGradient>
+<radialGradient id="rayGrad" gradientUnits="userSpaceOnUse" cx="0" cy="0" r="640">
+  <stop offset="0" stop-color="#B98CFF" stop-opacity=".55"/>
+  <stop offset=".5" stop-color="#5A8CFF" stop-opacity=".18"/>
+  <stop offset="1" stop-color="#43E6FC" stop-opacity="0"/>
+</radialGradient>
+
+<filter id="glow" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="36"/></filter>
+<filter id="soft" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="6"/></filter>
+
+<path id="star" pathLength="1" d="M 626.500,217.500 C 628.076,218.333 629.932,219.167 630.500,220.000 C 632.317,222.667 632.796,225.333 633.500,228.000 C 635.877,237.000 636.675,246.000 638.500,255.000 C 641.745,271.000 645.712,287.000 649.500,303.000 C 653.367,319.333 656.765,335.667 661.500,352.000 C 665.365,365.333 670.672,378.667 675.500,392.000 C 680.328,405.333 684.644,418.667 690.500,432.000 C 703.969,462.667 720.776,493.333 742.500,524.000 C 745.334,528.000 749.227,532.000 752.500,536.000 C 759.319,544.333 764.854,552.667 772.500,561.000 C 789.015,579.000 809.035,597.000 833.500,615.000 C 843.920,622.667 856.496,630.333 870.500,638.000 C 877.198,641.667 884.888,645.333 893.000,649.000 C 904.799,654.333 916.654,659.667 932.000,665.000 C 955.019,673.000 983.794,681.000 1019.000,689.000 C 1021.934,689.667 1025.738,690.333 1029.000,691.000 C 1038.785,693.000 1047.829,695.000 1057.500,697.000 C 1068.782,699.333 1081.793,701.667 1092.000,704.000 C 1097.833,705.333 1105.477,706.667 1108.000,708.000 C 1110.838,709.500 1113.500,711.000 1113.500,712.500 C 1113.500,714.333 1111.174,716.167 1108.000,718.000 C 1106.269,719.000 1099.591,720.000 1095.000,721.000 C 1076.635,725.000 1053.767,729.000 1034.500,733.000 C 1023.261,735.333 1011.696,737.667 1002.000,740.000 C 979.838,745.333 959.982,750.667 943.500,756.000 C 921.867,763.000 903.498,770.000 888.000,777.000 C 884.310,778.667 881.442,780.333 878.000,782.000 C 873.182,784.333 867.541,786.667 863.000,789.000 C 851.972,794.667 842.067,800.333 833.500,806.000 C 813.846,819.000 797.279,832.000 783.000,845.000 C 772.383,854.667 762.711,864.333 755.000,874.000 C 728.943,906.667 708.091,939.333 692.500,972.000 C 681.046,996.000 671.912,1020.000 664.500,1044.000 C 657.911,1065.333 653.405,1086.667 648.000,1108.000 C 645.636,1117.333 642.904,1126.667 641.000,1136.000 C 639.844,1141.667 639.350,1147.333 638.000,1153.000 C 637.285,1156.000 635.541,1159.000 635.000,1162.000 C 634.519,1164.667 634.571,1167.333 634.000,1170.000 C 633.714,1171.333 632.444,1172.667 632.000,1174.000 C 631.556,1175.333 631.622,1176.667 631.000,1178.000 C 630.612,1178.833 628.497,1179.667 626.500,1180.500 C 624.503,1179.667 622.388,1178.833 622.000,1178.000 C 621.378,1176.667 621.444,1175.333 621.000,1174.000 C 620.556,1172.667 619.286,1171.333 619.000,1170.000 C 618.429,1167.333 618.481,1164.667 618.000,1162.000 C 617.459,1159.000 615.715,1156.000 615.000,1153.000 C 613.650,1147.333 613.156,1141.667 612.000,1136.000 C 610.096,1126.667 607.364,1117.333 605.000,1108.000 C 599.595,1086.667 595.089,1065.333 588.500,1044.000 C 581.088,1020.000 571.954,996.000 560.500,972.000 C 544.909,939.333 524.057,906.667 498.000,874.000 C 490.289,864.333 480.617,854.667 470.000,845.000 C 455.721,832.000 439.154,819.000 419.500,806.000 C 410.933,800.333 401.028,794.667 390.000,789.000 C 385.459,786.667 379.818,784.333 375.000,782.000 C 371.558,780.333 368.690,778.667 365.000,777.000 C 349.502,770.000 331.133,763.000 309.500,756.000 C 293.018,750.667 273.162,745.333 251.000,740.000 C 241.304,737.667 229.739,735.333 218.500,733.000 C 199.233,729.000 176.365,725.000 158.000,721.000 C 153.409,720.000 146.731,719.000 145.000,718.000 C 141.826,716.167 139.500,714.333 139.500,712.500 C 139.500,711.000 142.162,709.500 145.000,708.000 C 147.523,706.667 155.167,705.333 161.000,704.000 C 171.207,701.667 184.218,699.333 195.500,697.000 C 205.171,695.000 214.215,693.000 224.000,691.000 C 227.262,690.333 231.066,689.667 234.000,689.000 C 269.206,681.000 297.981,673.000 321.000,665.000 C 336.346,659.667 348.201,654.333 360.000,649.000 C 368.112,645.333 375.802,641.667 382.500,638.000 C 396.504,630.333 409.080,622.667 419.500,615.000 C 443.965,597.000 463.985,579.000 480.500,561.000 C 488.146,552.667 493.681,544.333 500.500,536.000 C 503.773,532.000 507.666,528.000 510.500,524.000 C 532.224,493.333 549.031,462.667 562.500,432.000 C 568.356,418.667 572.672,405.333 577.500,392.000 C 582.328,378.667 587.635,365.333 591.500,352.000 C 596.235,335.667 599.633,319.333 603.500,303.000 C 607.288,287.000 611.255,271.000 614.500,255.000 C 616.325,246.000 617.123,237.000 619.500,228.000 C 620.204,225.333 620.683,222.667 622.500,220.000 C 623.068,219.167 624.924,218.333 626.500,217.500 Z"/>
+<clipPath id="starClip"><use href="#star" xlink:href="#star"/></clipPath>
+<clipPath id="haloBack"><rect x="0" y="-200" width="1300" height="396.6"/></clipPath>
+<clipPath id="haloFront"><rect x="0" y="196.6" width="1300" height="300"/></clipPath>
+<path id="sparkle" d="M0,-50 C4,-12 12,-4 50,0 C12,4 4,12 0,50 C-4,12 -12,4 -50,0 C-12,-4 -4,-12 0,-50 Z"/>
+</defs>
+
+<!-- Lichtstrahlen -->
+<g class="rays" transform="translate(626.5 699)" fill="url(#rayGrad)">
+  <g>
+    <animateTransform attributeName="transform" type="rotate" from="0" to="360" dur="24s" repeatCount="indefinite"/>
+    <path d="M0,0 L-26,-640 L26,-640 Z" transform="rotate(15)"/><path d="M0,0 L-16,-470 L16,-470 Z" transform="rotate(45)"/><path d="M0,0 L-26,-640 L26,-640 Z" transform="rotate(75)"/><path d="M0,0 L-16,-470 L16,-470 Z" transform="rotate(105)"/><path d="M0,0 L-26,-640 L26,-640 Z" transform="rotate(135)"/><path d="M0,0 L-16,-470 L16,-470 Z" transform="rotate(165)"/><path d="M0,0 L-26,-640 L26,-640 Z" transform="rotate(195)"/><path d="M0,0 L-16,-470 L16,-470 Z" transform="rotate(225)"/><path d="M0,0 L-26,-640 L26,-640 Z" transform="rotate(255)"/><path d="M0,0 L-16,-470 L16,-470 Z" transform="rotate(285)"/><path d="M0,0 L-26,-640 L26,-640 Z" transform="rotate(315)"/><path d="M0,0 L-16,-470 L16,-470 Z" transform="rotate(345)"/>
+  </g>
+</g>
+
+<!-- Heiligenschein, hintere Hälfte -->
+<g class="halo-in v halo-c"><g class="halo-float v halo-c">
+    <path d="M 284.689,196.618 A 341.811,103.241 0 1 0 968.311,196.618 A 341.811,103.241 0 1 0 284.689,196.618 Z M 354.119,195.287 A 272.381,68.235 0 1 1 898.881,195.287 A 272.381,68.235 0 1 1 354.119,195.287 Z" fill="url(#haloGradient)" fill-rule="evenodd" clip-path="url(#haloBack)"/>
+    <g class="comets"><circle r="52" fill="url(#comet)" opacity="1"><animateMotion dur="3s" repeatCount="indefinite" begin="-0.000s" path="M319.5,196.6 A307,86 0 0 1 933.5,196.6" keyPoints="0;1;1" keyTimes="0;0.5;1" calcMode="linear"/><animate attributeName="visibility" values="visible;hidden" keyTimes="0;0.5" calcMode="discrete" dur="3s" begin="-0.000s" repeatCount="indefinite"/></circle>
+<circle r="38" fill="url(#comet)" opacity="0.85"><animateMotion dur="3s" repeatCount="indefinite" begin="-0.045s" path="M319.5,196.6 A307,86 0 0 1 933.5,196.6" keyPoints="0;1;1" keyTimes="0;0.5;1" calcMode="linear"/><animate attributeName="visibility" values="visible;hidden" keyTimes="0;0.5" calcMode="discrete" dur="3s" begin="-0.045s" repeatCount="indefinite"/></circle>
+<circle r="31" fill="url(#comet)" opacity="0.7"><animateMotion dur="3s" repeatCount="indefinite" begin="-0.090s" path="M319.5,196.6 A307,86 0 0 1 933.5,196.6" keyPoints="0;1;1" keyTimes="0;0.5;1" calcMode="linear"/><animate attributeName="visibility" values="visible;hidden" keyTimes="0;0.5" calcMode="discrete" dur="3s" begin="-0.090s" repeatCount="indefinite"/></circle>
+<circle r="26" fill="url(#comet)" opacity="0.55"><animateMotion dur="3s" repeatCount="indefinite" begin="-0.135s" path="M319.5,196.6 A307,86 0 0 1 933.5,196.6" keyPoints="0;1;1" keyTimes="0;0.5;1" calcMode="linear"/><animate attributeName="visibility" values="visible;hidden" keyTimes="0;0.5" calcMode="discrete" dur="3s" begin="-0.135s" repeatCount="indefinite"/></circle>
+<circle r="21" fill="url(#comet)" opacity="0.42"><animateMotion dur="3s" repeatCount="indefinite" begin="-0.180s" path="M319.5,196.6 A307,86 0 0 1 933.5,196.6" keyPoints="0;1;1" keyTimes="0;0.5;1" calcMode="linear"/><animate attributeName="visibility" values="visible;hidden" keyTimes="0;0.5" calcMode="discrete" dur="3s" begin="-0.180s" repeatCount="indefinite"/></circle>
+<circle r="17" fill="url(#comet)" opacity="0.3"><animateMotion dur="3s" repeatCount="indefinite" begin="-0.225s" path="M319.5,196.6 A307,86 0 0 1 933.5,196.6" keyPoints="0;1;1" keyTimes="0;0.5;1" calcMode="linear"/><animate attributeName="visibility" values="visible;hidden" keyTimes="0;0.5" calcMode="discrete" dur="3s" begin="-0.225s" repeatCount="indefinite"/></circle>
+<circle r="13" fill="url(#comet)" opacity="0.2"><animateMotion dur="3s" repeatCount="indefinite" begin="-0.270s" path="M319.5,196.6 A307,86 0 0 1 933.5,196.6" keyPoints="0;1;1" keyTimes="0;0.5;1" calcMode="linear"/><animate attributeName="visibility" values="visible;hidden" keyTimes="0;0.5" calcMode="discrete" dur="3s" begin="-0.270s" repeatCount="indefinite"/></circle>
+<circle r="10" fill="url(#comet)" opacity="0.12"><animateMotion dur="3s" repeatCount="indefinite" begin="-0.315s" path="M319.5,196.6 A307,86 0 0 1 933.5,196.6" keyPoints="0;1;1" keyTimes="0;0.5;1" calcMode="linear"/><animate attributeName="visibility" values="visible;hidden" keyTimes="0;0.5" calcMode="discrete" dur="3s" begin="-0.315s" repeatCount="indefinite"/></circle><circle r="52" fill="url(#comet)" opacity="1"><animateMotion dur="3s" repeatCount="indefinite" begin="-1.500s" path="M319.5,196.6 A307,86 0 0 1 933.5,196.6" keyPoints="0;1;1" keyTimes="0;0.5;1" calcMode="linear"/><animate attributeName="visibility" values="visible;hidden" keyTimes="0;0.5" calcMode="discrete" dur="3s" begin="-1.500s" repeatCount="indefinite"/></circle>
+<circle r="38" fill="url(#comet)" opacity="0.85"><animateMotion dur="3s" repeatCount="indefinite" begin="-1.545s" path="M319.5,196.6 A307,86 0 0 1 933.5,196.6" keyPoints="0;1;1" keyTimes="0;0.5;1" calcMode="linear"/><animate attributeName="visibility" values="visible;hidden" keyTimes="0;0.5" calcMode="discrete" dur="3s" begin="-1.545s" repeatCount="indefinite"/></circle>
+<circle r="31" fill="url(#comet)" opacity="0.7"><animateMotion dur="3s" repeatCount="indefinite" begin="-1.590s" path="M319.5,196.6 A307,86 0 0 1 933.5,196.6" keyPoints="0;1;1" keyTimes="0;0.5;1" calcMode="linear"/><animate attributeName="visibility" values="visible;hidden" keyTimes="0;0.5" calcMode="discrete" dur="3s" begin="-1.590s" repeatCount="indefinite"/></circle>
+<circle r="26" fill="url(#comet)" opacity="0.55"><animateMotion dur="3s" repeatCount="indefinite" begin="-1.635s" path="M319.5,196.6 A307,86 0 0 1 933.5,196.6" keyPoints="0;1;1" keyTimes="0;0.5;1" calcMode="linear"/><animate attributeName="visibility" values="visible;hidden" keyTimes="0;0.5" calcMode="discrete" dur="3s" begin="-1.635s" repeatCount="indefinite"/></circle>
+<circle r="21" fill="url(#comet)" opacity="0.42"><animateMotion dur="3s" repeatCount="indefinite" begin="-1.680s" path="M319.5,196.6 A307,86 0 0 1 933.5,196.6" keyPoints="0;1;1" keyTimes="0;0.5;1" calcMode="linear"/><animate attributeName="visibility" values="visible;hidden" keyTimes="0;0.5" calcMode="discrete" dur="3s" begin="-1.680s" repeatCount="indefinite"/></circle>
+<circle r="17" fill="url(#comet)" opacity="0.3"><animateMotion dur="3s" repeatCount="indefinite" begin="-1.725s" path="M319.5,196.6 A307,86 0 0 1 933.5,196.6" keyPoints="0;1;1" keyTimes="0;0.5;1" calcMode="linear"/><animate attributeName="visibility" values="visible;hidden" keyTimes="0;0.5" calcMode="discrete" dur="3s" begin="-1.725s" repeatCount="indefinite"/></circle>
+<circle r="13" fill="url(#comet)" opacity="0.2"><animateMotion dur="3s" repeatCount="indefinite" begin="-1.770s" path="M319.5,196.6 A307,86 0 0 1 933.5,196.6" keyPoints="0;1;1" keyTimes="0;0.5;1" calcMode="linear"/><animate attributeName="visibility" values="visible;hidden" keyTimes="0;0.5" calcMode="discrete" dur="3s" begin="-1.770s" repeatCount="indefinite"/></circle>
+<circle r="10" fill="url(#comet)" opacity="0.12"><animateMotion dur="3s" repeatCount="indefinite" begin="-1.815s" path="M319.5,196.6 A307,86 0 0 1 933.5,196.6" keyPoints="0;1;1" keyTimes="0;0.5;1" calcMode="linear"/><animate attributeName="visibility" values="visible;hidden" keyTimes="0;0.5" calcMode="discrete" dur="3s" begin="-1.815s" repeatCount="indefinite"/></circle></g>
+  </g></g>
+
+<!-- Intro: Warp-Streifen -->
+<g><line class="streak" x1="626.5" y1="699" x2="714.8" y2="716.2" stroke="#3FD8FF" style="--x:549.7px;--y:106.9px;animation-delay:0.00s"/><line class="streak" x1="626.5" y1="699" x2="738.7" y2="782.7" stroke="#E07BFF" style="--x:505.0px;--y:376.6px;animation-delay:0.05s"/><line class="streak" x1="626.5" y1="699" x2="668.2" y2="778.8" stroke="#3FD8FF" style="--x:324.0px;--y:620.5px;animation-delay:0.10s"/><line class="streak" x1="626.5" y1="699" x2="631.0" y2="838.9" stroke="#E07BFF" style="--x:18.1px;--y:559.7px;animation-delay:0.15s"/><line class="streak" x1="626.5" y1="699" x2="590.1" y2="781.3" stroke="#3FD8FF" style="--x:-254.8px;--y:576.2px;animation-delay:0.00s"/><line class="streak" x1="626.5" y1="699" x2="519.9" y2="789.8" stroke="#E07BFF" style="--x:-532.9px;--y:453.9px;animation-delay:0.05s"/><line class="streak" x1="626.5" y1="699" x2="539.5" y2="721.9" stroke="#3FD8FF" style="--x:-541.6px;--y:142.2px;animation-delay:0.10s"/><line class="streak" x1="626.5" y1="699" x2="489.1" y2="672.3" stroke="#E07BFF" style="--x:-618.4px;--y:-120.2px;animation-delay:0.15s"/><line class="streak" x1="626.5" y1="699" x2="554.4" y2="645.2" stroke="#3FD8FF" style="--x:-561.1px;--y:-418.5px;animation-delay:0.00s"/><line class="streak" x1="626.5" y1="699" x2="561.7" y2="574.9" stroke="#E07BFF" style="--x:-259.2px;--y:-496.4px;animation-delay:0.05s"/><line class="streak" x1="626.5" y1="699" x2="623.6" y2="609.0" stroke="#3FD8FF" style="--x:-20.4px;--y:-629.7px;animation-delay:0.10s"/><line class="streak" x1="626.5" y1="699" x2="683.1" y2="571.0" stroke="#E07BFF" style="--x:283.1px;--y:-640.2px;animation-delay:0.15s"/><line class="streak" x1="626.5" y1="699" x2="695.0" y2="640.6" stroke="#3FD8FF" style="--x:426.3px;--y:-363.2px;animation-delay:0.00s"/><line class="streak" x1="626.5" y1="699" x2="761.9" y2="663.4" stroke="#E07BFF" style="--x:609.3px;--y:-160.0px;animation-delay:0.05s"/></g>
+
+<!-- Intro: Druckwelle -->
+<circle class="burst" cx="626.5" cy="699" r="40" fill="none" stroke="url(#starGradient)" stroke-width="40" opacity="0">
+  <animate attributeName="r" from="40" to="620" dur=".9s" begin=".82s" fill="freeze" calcMode="spline" keyTimes="0;1" keySplines=".1 .7 .3 1"/>
+  <animate attributeName="stroke-width" from="46" to="2" dur=".9s" begin=".82s" fill="freeze"/>
+  <animate attributeName="opacity" values="0;1;0" keyTimes="0;.05;1" dur=".9s" begin=".82s" fill="freeze"/>
+</circle>
+
+<!-- Echos -->
+<use class="echo v star-c" href="#star" xlink:href="#star"/>
+<use class="echo e2 v star-c" href="#star" xlink:href="#star"/>
+
+<!-- Stern -->
+<g class="ignite v star-c">
+  <g class="spin v star-c">
+    <g class="breathe v star-c">
+      <use class="glow" href="#star" xlink:href="#star" fill="url(#starGradient)" filter="url(#glow)"/>
+      <use href="#star" xlink:href="#star" fill="url(#starGradient)"/>
+      <rect class="shine" x="139" y="217" width="975" height="964" fill="url(#shine)" clip-path="url(#starClip)"/>
+    </g>
+  </g>
+</g>
+
+<!-- Intro: Umriss -->
+<use class="trace" href="#star" xlink:href="#star" filter="url(#soft)"/>
+<use class="trace" href="#star" xlink:href="#star" style="stroke-width:5"/>
+
+<!-- Intro: Blitz -->
+<circle class="flash v star-c" cx="626.5" cy="699" r="420" fill="url(#flashGrad)"/>
+
+<!-- Heiligenschein, vordere Hälfte (liegt vor der Sternspitze) -->
+<g class="halo-in v halo-c"><g class="halo-float v halo-c">
+    <path d="M 284.689,196.618 A 341.811,103.241 0 1 0 968.311,196.618 A 341.811,103.241 0 1 0 284.689,196.618 Z M 354.119,195.287 A 272.381,68.235 0 1 1 898.881,195.287 A 272.381,68.235 0 1 1 354.119,195.287 Z" fill="url(#haloGradient)" fill-rule="evenodd" clip-path="url(#haloFront)"/>
+    <g class="comets"><circle r="52" fill="url(#comet)" opacity="1"><animateMotion dur="3s" repeatCount="indefinite" begin="-0.000s" path="M933.5,196.6 A307,86 0 0 1 319.5,196.6" keyPoints="0;0;1" keyTimes="0;0.5;1" calcMode="linear"/><animate attributeName="visibility" values="hidden;visible" keyTimes="0;0.5" calcMode="discrete" dur="3s" begin="-0.000s" repeatCount="indefinite"/></circle>
+<circle r="38" fill="url(#comet)" opacity="0.85"><animateMotion dur="3s" repeatCount="indefinite" begin="-0.045s" path="M933.5,196.6 A307,86 0 0 1 319.5,196.6" keyPoints="0;0;1" keyTimes="0;0.5;1" calcMode="linear"/><animate attributeName="visibility" values="hidden;visible" keyTimes="0;0.5" calcMode="discrete" dur="3s" begin="-0.045s" repeatCount="indefinite"/></circle>
+<circle r="31" fill="url(#comet)" opacity="0.7"><animateMotion dur="3s" repeatCount="indefinite" begin="-0.090s" path="M933.5,196.6 A307,86 0 0 1 319.5,196.6" keyPoints="0;0;1" keyTimes="0;0.5;1" calcMode="linear"/><animate attributeName="visibility" values="hidden;visible" keyTimes="0;0.5" calcMode="discrete" dur="3s" begin="-0.090s" repeatCount="indefinite"/></circle>
+<circle r="26" fill="url(#comet)" opacity="0.55"><animateMotion dur="3s" repeatCount="indefinite" begin="-0.135s" path="M933.5,196.6 A307,86 0 0 1 319.5,196.6" keyPoints="0;0;1" keyTimes="0;0.5;1" calcMode="linear"/><animate attributeName="visibility" values="hidden;visible" keyTimes="0;0.5" calcMode="discrete" dur="3s" begin="-0.135s" repeatCount="indefinite"/></circle>
+<circle r="21" fill="url(#comet)" opacity="0.42"><animateMotion dur="3s" repeatCount="indefinite" begin="-0.180s" path="M933.5,196.6 A307,86 0 0 1 319.5,196.6" keyPoints="0;0;1" keyTimes="0;0.5;1" calcMode="linear"/><animate attributeName="visibility" values="hidden;visible" keyTimes="0;0.5" calcMode="discrete" dur="3s" begin="-0.180s" repeatCount="indefinite"/></circle>
+<circle r="17" fill="url(#comet)" opacity="0.3"><animateMotion dur="3s" repeatCount="indefinite" begin="-0.225s" path="M933.5,196.6 A307,86 0 0 1 319.5,196.6" keyPoints="0;0;1" keyTimes="0;0.5;1" calcMode="linear"/><animate attributeName="visibility" values="hidden;visible" keyTimes="0;0.5" calcMode="discrete" dur="3s" begin="-0.225s" repeatCount="indefinite"/></circle>
+<circle r="13" fill="url(#comet)" opacity="0.2"><animateMotion dur="3s" repeatCount="indefinite" begin="-0.270s" path="M933.5,196.6 A307,86 0 0 1 319.5,196.6" keyPoints="0;0;1" keyTimes="0;0.5;1" calcMode="linear"/><animate attributeName="visibility" values="hidden;visible" keyTimes="0;0.5" calcMode="discrete" dur="3s" begin="-0.270s" repeatCount="indefinite"/></circle>
+<circle r="10" fill="url(#comet)" opacity="0.12"><animateMotion dur="3s" repeatCount="indefinite" begin="-0.315s" path="M933.5,196.6 A307,86 0 0 1 319.5,196.6" keyPoints="0;0;1" keyTimes="0;0.5;1" calcMode="linear"/><animate attributeName="visibility" values="hidden;visible" keyTimes="0;0.5" calcMode="discrete" dur="3s" begin="-0.315s" repeatCount="indefinite"/></circle><circle r="52" fill="url(#comet)" opacity="1"><animateMotion dur="3s" repeatCount="indefinite" begin="-1.500s" path="M933.5,196.6 A307,86 0 0 1 319.5,196.6" keyPoints="0;0;1" keyTimes="0;0.5;1" calcMode="linear"/><animate attributeName="visibility" values="hidden;visible" keyTimes="0;0.5" calcMode="discrete" dur="3s" begin="-1.500s" repeatCount="indefinite"/></circle>
+<circle r="38" fill="url(#comet)" opacity="0.85"><animateMotion dur="3s" repeatCount="indefinite" begin="-1.545s" path="M933.5,196.6 A307,86 0 0 1 319.5,196.6" keyPoints="0;0;1" keyTimes="0;0.5;1" calcMode="linear"/><animate attributeName="visibility" values="hidden;visible" keyTimes="0;0.5" calcMode="discrete" dur="3s" begin="-1.545s" repeatCount="indefinite"/></circle>
+<circle r="31" fill="url(#comet)" opacity="0.7"><animateMotion dur="3s" repeatCount="indefinite" begin="-1.590s" path="M933.5,196.6 A307,86 0 0 1 319.5,196.6" keyPoints="0;0;1" keyTimes="0;0.5;1" calcMode="linear"/><animate attributeName="visibility" values="hidden;visible" keyTimes="0;0.5" calcMode="discrete" dur="3s" begin="-1.590s" repeatCount="indefinite"/></circle>
+<circle r="26" fill="url(#comet)" opacity="0.55"><animateMotion dur="3s" repeatCount="indefinite" begin="-1.635s" path="M933.5,196.6 A307,86 0 0 1 319.5,196.6" keyPoints="0;0;1" keyTimes="0;0.5;1" calcMode="linear"/><animate attributeName="visibility" values="hidden;visible" keyTimes="0;0.5" calcMode="discrete" dur="3s" begin="-1.635s" repeatCount="indefinite"/></circle>
+<circle r="21" fill="url(#comet)" opacity="0.42"><animateMotion dur="3s" repeatCount="indefinite" begin="-1.680s" path="M933.5,196.6 A307,86 0 0 1 319.5,196.6" keyPoints="0;0;1" keyTimes="0;0.5;1" calcMode="linear"/><animate attributeName="visibility" values="hidden;visible" keyTimes="0;0.5" calcMode="discrete" dur="3s" begin="-1.680s" repeatCount="indefinite"/></circle>
+<circle r="17" fill="url(#comet)" opacity="0.3"><animateMotion dur="3s" repeatCount="indefinite" begin="-1.725s" path="M933.5,196.6 A307,86 0 0 1 319.5,196.6" keyPoints="0;0;1" keyTimes="0;0.5;1" calcMode="linear"/><animate attributeName="visibility" values="hidden;visible" keyTimes="0;0.5" calcMode="discrete" dur="3s" begin="-1.725s" repeatCount="indefinite"/></circle>
+<circle r="13" fill="url(#comet)" opacity="0.2"><animateMotion dur="3s" repeatCount="indefinite" begin="-1.770s" path="M933.5,196.6 A307,86 0 0 1 319.5,196.6" keyPoints="0;0;1" keyTimes="0;0.5;1" calcMode="linear"/><animate attributeName="visibility" values="hidden;visible" keyTimes="0;0.5" calcMode="discrete" dur="3s" begin="-1.770s" repeatCount="indefinite"/></circle>
+<circle r="10" fill="url(#comet)" opacity="0.12"><animateMotion dur="3s" repeatCount="indefinite" begin="-1.815s" path="M933.5,196.6 A307,86 0 0 1 319.5,196.6" keyPoints="0;0;1" keyTimes="0;0.5;1" calcMode="linear"/><animate attributeName="visibility" values="hidden;visible" keyTimes="0;0.5" calcMode="discrete" dur="3s" begin="-1.815s" repeatCount="indefinite"/></circle></g>
+  </g></g>
+
+<!-- Landewelle des Heiligenscheins -->
+<ellipse class="ripple" cx="626.5" cy="196.6" rx="340" ry="103" fill="none" stroke="url(#haloGradient)" stroke-width="18" opacity="0">
+  <animate attributeName="rx" from="340" to="560" dur=".7s" begin="1.78s" fill="freeze" calcMode="spline" keyTimes="0;1" keySplines=".1 .7 .3 1"/>
+  <animate attributeName="ry" from="103" to="175" dur=".7s" begin="1.78s" fill="freeze" calcMode="spline" keyTimes="0;1" keySplines=".1 .7 .3 1"/>
+  <animate attributeName="opacity" values="0;.9;0" keyTimes="0;.05;1" dur=".7s" begin="1.78s" fill="freeze"/>
+</ellipse>
+
+<!-- Funken -->
+<g transform="translate(300 450)"><use class="spark" href="#sparkle" xlink:href="#sparkle" fill="#E07BFF" style="animation-delay:2.1s"/></g>
+<g transform="translate(975 995) scale(.85)"><use class="spark" href="#sparkle" xlink:href="#sparkle" fill="#3FD8FF" style="animation-delay:2.8s"/></g>
+<g transform="translate(1000 440) scale(.6)"><use class="spark" href="#sparkle" xlink:href="#sparkle" fill="#3FD8FF" style="animation-delay:3.5s"/></g>
+<g transform="translate(265 985) scale(.7)"><use class="spark" href="#sparkle" xlink:href="#sparkle" fill="#E07BFF" style="animation-delay:2.4s"/></g>
+<g transform="translate(830 330) scale(.45)"><use class="spark" href="#sparkle" xlink:href="#sparkle" fill="#fff" style="animation-delay:4.1s"/></g>
+</svg>

@@ -3,13 +3,18 @@ import { ConversationStore } from './chat/session';
 import { adminKeySecret, apiKeySecret, loadProviders } from './providers/registry';
 import { UsageService } from './usage/usageService';
 import { ChatViewProvider } from './views/chatViewProvider';
+import { initModelAliases } from './providers/modelAliases';
 import { UsagePanel } from './views/usagePanel';
+import { PlanPanel } from './views/planPanel';
 import { t } from './i18n';
+import { projectContext } from './context/projectContext';
 
 export function activate(context: vscode.ExtensionContext): void {
+  initModelAliases(context.globalState);
   const store = new ConversationStore(context.globalState);
   const usagePanel = new UsagePanel(context, new UsageService(context.secrets, context.globalState));
-  const chat = new ChatViewProvider(context, store, usagePanel);
+  const planPanel = new PlanPanel(context);
+  const chat = new ChatViewProvider(context, store, usagePanel, planPanel);
 
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider(ChatViewProvider.viewType, chat, {
@@ -27,8 +32,16 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('polyagent.editProviders', () =>
       vscode.commands.executeCommand('workbench.action.openSettings', 'polyagent.providers')
     ),
-    { dispose: () => usagePanel.dispose() }
+    { dispose: () => usagePanel.dispose() },
+    { dispose: () => planPanel.dispose() }
   );
+
+  // Keep the local repo map fresh without putting source code in global state or on disk.
+  const watcher = vscode.workspace.createFileSystemWatcher('**/*');
+  watcher.onDidCreate(() => projectContext.invalidate());
+  watcher.onDidChange(() => projectContext.invalidate());
+  watcher.onDidDelete(() => projectContext.invalidate());
+  context.subscriptions.push(watcher);
 }
 
 export function deactivate(): void {

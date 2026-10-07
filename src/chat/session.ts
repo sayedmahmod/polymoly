@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { Attachment, EffortLevel, TokenUsage } from '../types';
+import { ChatMode } from './modes';
 
 export interface ToolCall {
   id: string;
@@ -27,6 +28,10 @@ export interface ChatMessage {
   skippedAttachments?: { name: string; note: string }[];
   /** User message that PolyMoly wrote to continue after a provider switch. */
   handoff?: boolean;
+  /** Plan this answer produced, rendered as a preview card in the transcript. */
+  plan?: { id: string; path?: string; title: string; preview: string; taskCount: number; waveCount: number };
+  /** Mode the message was written in, so a switch stays visible in the transcript. */
+  mode?: ChatMode;
   createdAt: number;
 }
 
@@ -40,7 +45,15 @@ export interface Conversation {
   providerSessions: Record<string, string>;
   effort: EffortLevel;
   thinking: boolean;
+  /** chat, plan or ask. Missing on chats stored before modes existed: treated as chat. */
+  mode?: ChatMode;
   showTools: boolean;
+  /**
+   * Per-chat override of the provider's permission level: Claude's `--permission-mode`, Codex's
+   * `--sandbox`, or an HTTP provider's local tool level (`readonly` | `write` | `auto`), stored
+   * in the target protocol's own terms. Undefined falls back to the matching `polyagent.*` setting.
+   */
+  permission?: string;
   createdAt: number;
   updatedAt: number;
 }
@@ -59,6 +72,7 @@ export function newConversation(providerId: string, model?: string): Conversatio
     providerSessions: {},
     effort: 'high',
     thinking: true,
+    mode: 'chat',
     showTools: true,
     createdAt: now,
     updatedAt: now

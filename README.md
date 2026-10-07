@@ -28,6 +28,7 @@ Switch models mid-conversation, keep one skill library for every agent, and see 
 ## Contents
 
 - [Why PolyMoly](#why-polymoly)
+- [Chat, plan and ask](#chat-plan-and-ask)
 - [Installation](#installation)
 - [First steps](#first-steps)
 - [Features](#features)
@@ -89,7 +90,8 @@ PolyMoly drives the agents you already have. Install the ones you want and log i
 | Claude Code | `npm i -g @anthropic-ai/claude-code` | `claude` |
 | Codex | `npm i -g @openai/codex` | `codex login` |
 
-HTTP providers such as MiniMax or the Anthropic API only need an API key (see below). No CLI needed.
+Claude Code and Codex are the two providers that are on out of the box. Every other provider is an
+API connector that ships switched off and only needs an API key (see below). No CLI needed.
 
 ## First steps
 
@@ -99,6 +101,43 @@ HTTP providers such as MiniMax or the Anthropic API only need an API key (see be
 4. Type your task and press `Enter`. `Shift+Enter` inserts a new line.
 
 ## Features
+
+### Chat, plan and ask
+
+Three modes sit in the composer bar and decide how a message is treated.
+
+**Chat** works as before: ask, change, run. When a message reads like a project rather than a
+question, PolyMoly offers to plan it first and switches by itself after 30 seconds unless you say
+otherwise.
+
+**Plan** writes a plan instead of code. The provider runs read-only (`--permission-mode plan` for
+Claude, `--sandbox read-only` for Codex), reads the repository, and answers with a plan that is cut
+into atomic tasks: everything that can run in parallel does, and only what truly depends on another
+task is sequential. Each task carries its own goal, boundaries, files, context and acceptance
+checks, and is rated `low`, `mid` or `hard`. A weak model is a weak plan, so PolyMoly says so before
+planning and lets you switch to a top model at high effort first.
+
+The plan is written to `.polymoly/plans/<date>-<title>.md` and appears as a preview card in the
+transcript. **View full plan** opens it in the editor area: a wave graph on top (columns are waves,
+everything in a column runs at the same time, arrows are dependencies), the plan document below, and
+one model dropdown per tier. Pick which of your models runs the `hard`, `mid` and `low` tasks, then
+run the whole plan, a Cmd-clicked selection, or a single task. The markdown file is the source of
+truth: edit it, hit **Reload**, and the next run uses your version.
+
+Each task node also has **View chat**. It opens a task-local inspector beside the plan with the live
+thinking stream (when the provider exposes it), tool calls and results, notices, errors and final
+output. Follow-up messages stay attached to that task; CLI providers resume the task session when
+they support it.
+
+### Local repository map
+
+PolyMoly indexes the workspace locally into a compact map of paths, top-level signatures and relative
+imports. For each prompt it ranks that map against the request and sends only the result within a
+fixed budget—never the complete repository. The index is invalidated when workspace files change.
+This gives a model orientation cheaply while its file tools can still read the exact source on demand.
+
+**Ask** only reads and answers. If you ask for a change instead, PolyMoly offers to move the message
+to chat or plan mode.
 
 ### Transcript with tool timeline
 
@@ -174,8 +213,48 @@ The whole interface is available in **German, English, Spanish, French, Arabic**
 | --- | --- | --- |
 | `claude` | CLI | `claude -p --output-format stream-json` |
 | `codex` | CLI | `codex exec --json` |
-| `minimax` | HTTP | `https://api.minimax.io/v1`, OpenAI-compatible |
-| `anthropic-api` | HTTP | `https://api.anthropic.com/v1`, Messages API |
+| `zai` | CLI | `claude` CLI pointed at `https://api.z.ai/api/anthropic` with your Z.ai key |
+
+`claude` and `codex` are enabled by default. Everything below is off until you switch it on.
+
+### API connectors
+
+Each of these is a ready-made template: switch the provider on, paste an API key, then press
+**Fetch models** to read the live model list from the endpoint. The seeded models are only a
+starting point.
+
+| ID | Base URL | API |
+| --- | --- | --- |
+| `zai-api` | `https://api.z.ai/api/anthropic/v1` | Anthropic Messages |
+| `zai-coding` | `https://api.z.ai/api/coding/paas/v4` | OpenAI |
+| `openai-api` | `https://api.openai.com/v1` | OpenAI |
+| `anthropic-api` | `https://api.anthropic.com/v1` | Anthropic Messages |
+| `minimax` | `https://api.minimax.io/v1` | OpenAI |
+| `openrouter` | `https://openrouter.ai/api/v1` | OpenAI |
+| `deepseek` | `https://api.deepseek.com/v1` | OpenAI |
+| `moonshot` | `https://api.moonshot.ai/v1` | OpenAI |
+| `moonshot-anthropic` | `https://api.moonshot.ai/anthropic/v1` | Anthropic Messages |
+| `xai` | `https://api.x.ai/v1` | OpenAI |
+| `mistral` | `https://api.mistral.ai/v1` | OpenAI |
+| `gemini` | `https://generativelanguage.googleapis.com/v1beta/openai` | OpenAI |
+| `qwen` | `https://dashscope-intl.aliyuncs.com/compatible-mode/v1` | OpenAI |
+| `perplexity` | `https://api.perplexity.ai` | OpenAI |
+| `groq` | `https://api.groq.com/openai/v1` | OpenAI |
+| `cerebras` | `https://api.cerebras.ai/v1` | OpenAI |
+| `together` | `https://api.together.xyz/v1` | OpenAI |
+| `fireworks` | `https://api.fireworks.ai/inference/v1` | OpenAI |
+| `deepinfra` | `https://api.deepinfra.com/v1/openai` | OpenAI |
+| `nebius` | `https://api.tokenfactory.nebius.com/v1` | OpenAI |
+| `novita` | `https://api.novita.ai/openai/v1` | OpenAI |
+| `siliconflow` | `https://api.siliconflow.com/v1` | OpenAI |
+| `github-models` | `https://models.github.ai/inference` | OpenAI |
+| `vercel-gateway` | `https://ai-gateway.vercel.sh/v1` | OpenAI |
+| `ollama` | `http://localhost:11434/v1` | OpenAI |
+| `lmstudio` | `http://localhost:1234/v1` | OpenAI |
+
+`qwen` points at the international DashScope region; mainland China is
+`https://dashscope.aliyuncs.com/compatible-mode/v1`. `ollama` and `lmstudio` talk to a local
+server and ignore the key, so any placeholder does.
 
 ### Custom providers
 
@@ -214,6 +293,33 @@ Add providers in the settings panel, or in `settings.json` under `polyagent.prov
 | both | `models`, `defaultModel`, `supportsEffort`, `supportsThinking`, `usage` |
 
 Per model: `label`, `description`, `tier`, `efforts`, `defaultEffort`, `contextWindow`, `inputs` (e.g. `["image", "pdf"]`) and `pricing` (USD per million tokens).
+
+### Z.ai GLM (Coding Plan)
+
+Three built-in providers use the GLM Coding Plan. All need a Coding Plan API key from [z.ai/manage-apikey](https://z.ai/manage-apikey/apikey-list), saved in the provider's settings card.
+
+- **`zai`** runs the `claude` CLI with `ANTHROPIC_BASE_URL=https://api.z.ai/api/anthropic` and the key as `ANTHROPIC_AUTH_TOKEN`, as described in the [Z.ai docs](https://docs.z.ai/devpack/tool/claude). Your normal Claude login is not touched. This is the agentic path: the CLI runs tools and edits files.
+- **`zai-api`** and **`zai-coding`** call the Coding Plan directly over HTTP, without a CLI. PolyMoly gives them local agent tools (see below), so GLM can read and edit files and run commands too.
+
+### Agent mode for API providers
+
+HTTP providers have no agent runtime of their own, so PolyMoly runs one for them: the model gets
+`run_command`, `read_file`, `write_file`, `edit_file`, `list_dir`, `glob` and `grep` as function
+calls, executed locally in the workspace, with the same tool timeline in the transcript as the CLI
+agents. Three permission levels control what the model may do; the default comes from
+`polyagent.http.permissionMode`, the composer chip overrides it per chat.
+
+| Level | What the model may do |
+| --- | --- |
+| `readonly` | Read, list and search only — no writes, no shell |
+| `write` | Edit and create files freely; every shell command asks first |
+| `auto` | Everything without asking |
+
+A turn is bounded no matter how chatty the model gets: after 24 tool rounds the tools are withdrawn
+and the model must deliver a final answer, every command has a hard timeout (60 s default, 10 min
+maximum), and tool output is capped. In `write` mode the confirmation dialog has **Always in this
+chat**, so a trusted command kind asks only once. Plan and ask mode force `readonly`, matching the
+CLI providers.
 
 ## Accounts & usage
 
@@ -260,6 +366,9 @@ Placeholders: `{{start}}`, `{{end}}` (ISO 8601), `{{startUnix}}`, `{{endUnix}}` 
 | `polyagent.fallbackOrder` | `[]` | Hand-off targets, `provider` or `provider/model` |
 | `polyagent.claude.permissionMode` | `acceptEdits` | `--permission-mode` of the Claude CLI |
 | `polyagent.codex.sandbox` | `workspace-write` | `--sandbox` of `codex exec` |
+| `polyagent.http.permissionMode` | `write` | Local agent tools of API providers: `readonly`, `write`, `auto` |
+| `polyagent.plan.maxParallelTasks` | `4` | Independent plan tasks allowed to run simultaneously (1–8) |
+| `polyagent.context.tokenBudget` | `1400` | Upper limit for the query-ranked local repository map (400–8000) |
 | `polyagent.usage.days` | `30` | Days queried by the usage view |
 | `polyagent.usage.autoRefreshMinutes` | `0` | Auto-refresh of the usage view, `0` is off |
 

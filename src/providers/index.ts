@@ -6,7 +6,7 @@ import { apiKeySecret } from './registry';
 
 export function createAdapter(def: ProviderDef, secrets: vscode.SecretStorage): AgentAdapter {
   if (def.kind === 'cli') {
-    return new CliAdapter(def);
+    return new CliAdapter(def, async (id) => secrets.get(apiKeySecret(id)));
   }
   return new HttpAdapter(def, async (id) => secrets.get(apiKeySecret(id)));
 }

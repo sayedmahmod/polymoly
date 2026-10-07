@@ -4,6 +4,12 @@ import { ChatController, effortFor, modelLabeler } from '../chat/controller';
 import { attachmentSupport, describeFile, storeDroppedFile } from '../chat/attachments';
 import { HandoffTarget, lastUsage, planTransfer, QuotaHit, suggestTarget } from '../chat/handoff';
 import { Conversation, ConversationStore, newConversation } from '../chat/session';
+import { ChatMode, CHAT_MODES, isStrongPlanner, looksLikeBigTask, looksLikeRequestToAct } from '../chat/modes';
+import { normalizeClaudePermission, translatePermission } from '../chat/permissions';
+import { extractPlan } from '../plan/planFormat';
+import { planPreview, savePlan } from '../plan/planStore';
+import { Plan, PlanRun, planWaves } from '../plan/planTypes';
+import { PlanPanel } from './planPanel';
 import {
   adminKeySecret,
   apiKeySecret,
@@ -11,6 +17,7 @@ import {
   isBuiltin,
   loadMcpServers,
   loadProviders,
+  needsApiKey,
   removeProviderOverride,
   updateProviderOverride
 } from '../providers/registry';
@@ -32,8 +39,19 @@ import { Attachment, McpServerDef, ModelDef, ProviderDef } from '../types';
 import { UsagePanel } from './usagePanel';
 
 const LIMITS_REFRESH_MS = 60_000;
+const MODELS_REFRESHED_KEY = 'polyagent.modelsRefreshedAt';
+const MODELS_REFRESH_MS = 24 * 60 * 60 * 1000;
 /** How long a provider counts as exhausted when it does not say when its limit resets. */
 const EXHAUSTED_FALLBACK_MS = 60 * 60_000;
+
+/**
+ * A message held back because the mode does not fit it: chat mode was handed a project,
+ * plan mode a weak model, ask mode an order. The user answers, then it is sent.
+ */
+interface PendingSend {
+  kind: 'planSuggest' | 'planWarn' | 'askSuggest';
+  text: string;
+}
 
 /** Offer to continue the conversation on another model after a quota hit. */
 interface PendingHandoff {
@@ -51,6 +69,10 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   private readonly limits: LimitsService;
   private limitsTimer?: NodeJS.Timeout;
   private handoff?: PendingHandoff;
+  /** Message waiting for the user to answer a mode question. */
+  private pending?: PendingSend;
+  /** Plans written this session, so a card still opens when its file was moved away. */
+  private readonly plans = new Map<string, Plan>();
   /** Files attached to the message being written. */
   private attachments: Attachment[] = [];
   /** Provider id to epoch ms until which it is out of quota. */
@@ -59,8 +81,10 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   constructor(
     private readonly context: vscode.ExtensionContext,
     private readonly store: ConversationStore,
-    private readonly usagePanel: UsagePanel
+    private readonly usagePanel: UsagePanel,
+    private readonly planPanel: PlanPanel
   ) {
+    planPanel.onRunFinished = (plan, run) => this.noteRun(plan, run);
     this.controller = new ChatController(context.secrets, store, context.globalState);
     this.limits = new LimitsService(context.globalState, context.secrets);
     const defaultProvider = vscode.workspace
@@ -78,6 +102,56 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       }),
       { dispose: () => clearInterval(this.limitsTimer) }
     );
+    void this.refreshAllModels();
+  }
+
+  /** Fetches /models for every enabled API provider with a stored key, at most once a day each. */
+  private async refreshAllModels(): Promise<void> {
+    const stamps = this.context.globalState.get<Record<string, number>>(MODELS_REFRESHED_KEY, {});
+    for (const def of loadProviders()) {
+      if (def.kind !== 'http' || def.enabled === false || Date.now() - (stamps[def.id] ?? 0) < MODELS_REFRESH_MS) {
+        continue;
+      }
+      if (!(await this.context.secrets.get(apiKeySecret(def.id)))) {
+        continue;
+      }
+      try {
+        await this.refreshModels(def);
+        stamps[def.id] = Date.now();
+        await this.context.globalState.update(MODELS_REFRESHED_KEY, stamps);
+      } catch {
+        // Offline or bad key: the settings modal reports it when the user fetches by hand.
+      }
+    }
+  }
+
+  /** Stores the provider's /models list; returns it with the count of ids not known before. */
+  private async refreshModels(def: ProviderDef): Promise<{ fetched: ModelDef[]; added: number }> {
+    const fetched = await new HttpAdapter(def, async (key) => this.context.secrets.get(apiKeySecret(key))).listModels();
+    if (!fetched.length) {
+      return { fetched, added: 0 };
+    }
+    const known = new Set((def.models ?? []).map((m) => m.id));
+    const added = fetched.filter((m) => !known.has(m.id)).length;
+    const disabled = new Set(def.disabledModels ?? []);
+    // Long catalogues (e.g. routers) would flood the model menu, so new entries start switched off.
+    if (fetched.length > 15) {
+      for (const model of fetched) {
+        if (!known.has(model.id)) {
+          disabled.add(model.id);
+        }
+      }
+    }
+    const same = (a: ModelDef[] = [], b: ModelDef[]) =>
+      a.length === b.length && a.every((m, i) => m.id === b[i].id && m.label === b[i].label);
+    if (!added && same(def.fetchedModels, fetched)) {
+      return { fetched, added };
+    }
+    await updateProviderOverride(def.id, {
+      fetchedModels: fetched,
+      disabledModels: disabled.size ? [...disabled] : undefined
+    });
+    return { fetched, added };
   }
 
   resolveWebviewView(view: vscode.WebviewView): void {
@@ -105,8 +179,11 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   newChat(): void {
     this.controller.cancel();
     this.handoff = undefined;
+    this.pending = undefined;
     this.attachments = [];
+    const mode = this.conversation.mode ?? 'chat';
     this.conversation = newConversation(this.conversation.providerId, this.conversation.model);
+    this.conversation.mode = mode;
     this.postState();
   }
 
@@ -124,16 +201,25 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         id: p.id,
         label: p.label,
         kind: p.kind,
+        protocol: p.protocol,
         description: providerDescription(p),
         defaultModel: p.defaultModel,
         supportsThinking: p.supportsThinking !== false,
         models: localizedModels(p)
       })),
       conversation: this.conversation,
+      mode: this.conversation.mode ?? 'chat',
+      pending: this.pending ? { kind: this.pending.kind, text: this.pending.text, modelLabel: this.switchLabel(this.conversation.providerId, this.conversation.model, this.conversation.effort) } : null,
       handoff: this.handoffView(),
       attachments: this.attachmentView(),
       skills: activeSkills().map((skill) => ({ name: skill.name, description: skill.description })),
       running: this.controller.running,
+      // What each adapter falls back to when the chat has no permission of its own.
+      permissionDefaults: {
+        claude: vscode.workspace.getConfiguration('polyagent').get<string>('claude.permissionMode', 'acceptEdits'),
+        codex: vscode.workspace.getConfiguration('polyagent').get<string>('codex.sandbox', 'workspace-write'),
+        http: vscode.workspace.getConfiguration('polyagent').get<string>('http.permissionMode', 'write')
+      },
       version: this.context.extension.packageJSON.version
     };
   }
@@ -215,7 +301,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     const providers = enabledProviders();
     const withKey = new Set<string>();
     for (const def of providers) {
-      if (def.kind === 'cli' || (await this.context.secrets.get(apiKeySecret(def.id)))) {
+      if (!needsApiKey(def) || (await this.context.secrets.get(apiKeySecret(def.id)))) {
         withKey.add(def.id);
       }
     }
@@ -303,9 +389,18 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     if (chosen?.efforts?.length && !chosen.efforts.includes(this.conversation.effort)) {
       this.conversation.effort = chosen.defaultEffort ?? chosen.efforts[chosen.efforts.length - 1];
     }
+    // A codex sandbox value would abort a claude run (and vice versa); keep the chat's choice,
+    // expressed for the new provider's CLI.
+    this.conversation.permission = translatePermission(this.conversation.permission, def);
     this.noteSwitch(before);
     this.postState();
     void this.refreshLimits();
+    // The held message was only waiting for a stronger planner: a good pick sends it.
+    if (this.pending?.kind === 'planWarn' && !this.gate(this.pending.text)) {
+      const held = this.pending.text;
+      this.pending = undefined;
+      void this.send(held, false, true);
+    }
   }
 
   private async onMessage(message: any): Promise<void> {
@@ -318,6 +413,32 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       case 'send':
         await this.send(String(message.text ?? ''));
         return;
+
+      case 'setMode': {
+        const mode = String(message.mode) as ChatMode;
+        if (CHAT_MODES.includes(mode) && mode !== (this.conversation.mode ?? 'chat')) {
+          this.conversation.mode = mode;
+          this.pending = undefined;
+          await this.store.save(this.conversation);
+        }
+        this.postState();
+        return;
+      }
+
+      case 'pendingResolve':
+        await this.resolvePending(String(message.action));
+        return;
+
+      case 'openPlan': {
+        const file = message.path ? String(message.path) : undefined;
+        const plan = this.planOf(String(message.messageId ?? ''));
+        if (file) {
+          await this.planPanel.openFile(file, plan);
+        } else if (plan) {
+          await this.planPanel.show(plan);
+        }
+        return;
+      }
 
       case 'addAttachments': {
         const paths = (Array.isArray(message.uris) ? message.uris : [])
@@ -389,6 +510,11 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         this.postState();
         return;
 
+      case 'setPermission':
+        this.conversation.permission = message.mode ? String(message.mode) : undefined;
+        this.postState();
+        return;
+
       case 'setShowTools':
         this.conversation.showTools = Boolean(message.showTools);
         this.postState();
@@ -417,6 +543,11 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
           this.handoff = undefined;
           this.attachments = [];
           this.conversation = picked;
+          // Chats stored before a provider switch can carry a permission of the wrong protocol.
+          this.conversation.permission = translatePermission(
+            this.conversation.permission,
+            enabledProviders().find((p) => p.id === picked.providerId)
+          );
           this.postState();
           void this.refreshLimits();
         }
@@ -515,6 +646,8 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         enabled: p.enabled !== false,
         command: p.command,
         protocol: p.protocol,
+        apiKeyEnv: p.apiKeyEnv,
+        needsApiKey: needsApiKey(p),
         baseUrl: p.baseUrl,
         api: p.api,
         models: (p.models ?? []).map((m) => ({
@@ -539,8 +672,11 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         },
         general: {
           defaultProvider: config.get<string>('defaultProvider', 'claude'),
-          claudePermissionMode: config.get<string>('claude.permissionMode', 'acceptEdits'),
+          claudePermissionMode: normalizeClaudePermission(config.get<string>('claude.permissionMode', 'acceptEdits')),
           codexSandbox: config.get<string>('codex.sandbox', 'workspace-write'),
+          httpPermissionMode: config.get<string>('http.permissionMode', 'write'),
+          planMaxParallelTasks: config.get<number>('plan.maxParallelTasks', 4),
+          contextTokenBudget: config.get<number>('context.tokenBudget', 1400),
           language: config.get<string>('language', 'auto'),
           languages: LANGS.map((id) => [id, LANGUAGE_NAMES[id]])
         }
@@ -595,8 +731,9 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
           throw new Error(t('err.fetchApiOnly'));
         }
         let fetched: ModelDef[];
+        let added: number;
         try {
-          fetched = await new HttpAdapter(def, async (key) => this.context.secrets.get(apiKeySecret(key))).listModels();
+          ({ fetched, added } = await this.refreshModels(def));
         } catch (err) {
           const detail = err instanceof Error ? err.message : String(err);
           this.post({ type: 'providerCheck', providerId: id, ok: false, detail: t('err.fetchFailed', { detail }) });
@@ -606,21 +743,6 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
           this.post({ type: 'providerCheck', providerId: id, ok: false, detail: t('err.noModelsReturned') });
           return;
         }
-        const known = new Set((def.models ?? []).map((m) => m.id));
-        const disabled = new Set(def.disabledModels ?? []);
-        // Long catalogues (e.g. routers) would flood the model menu, so new entries start switched off.
-        if (fetched.length > 15) {
-          for (const model of fetched) {
-            if (!known.has(model.id)) {
-              disabled.add(model.id);
-            }
-          }
-        }
-        await updateProviderOverride(id, {
-          fetchedModels: fetched,
-          disabledModels: disabled.size ? [...disabled] : undefined
-        });
-        const added = fetched.filter((m) => !known.has(m.id)).length;
         this.post({
           type: 'providerCheck',
           providerId: id,
@@ -798,11 +920,25 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
           defaultProvider: 'defaultProvider',
           claudePermissionMode: 'claude.permissionMode',
           codexSandbox: 'codex.sandbox',
+          httpPermissionMode: 'http.permissionMode',
+          planMaxParallelTasks: 'plan.maxParallelTasks',
+          contextTokenBudget: 'context.tokenBudget',
           language: 'language'
         };
         const key = keys[String(message.key)];
         if (key) {
-          await config.update(key, String(message.value), vscode.ConfigurationTarget.Global);
+          if (key === 'plan.maxParallelTasks' || key === 'context.tokenBudget') {
+            const value = Number(message.value);
+            const valid = key === 'plan.maxParallelTasks'
+              ? Number.isInteger(value) && value >= 1 && value <= 8
+              : Number.isInteger(value) && value >= 400 && value <= 8000;
+            if (!valid) {
+              throw new Error(t('err.invalidNumber'));
+            }
+            await config.update(key, value, vscode.ConfigurationTarget.Global);
+          } else {
+            await config.update(key, String(message.value), vscode.ConfigurationTarget.Global);
+          }
         }
         return;
       }
@@ -812,12 +948,136 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     }
   }
 
-  private async send(text: string, handoff = false): Promise<void> {
+  /** The plan a transcript card belongs to, as far as this session still has it in memory. */
+  private planOf(messageId: string): Plan | undefined {
+    const message = this.conversation.messages.find((m) => m.id === messageId);
+    return message?.plan ? this.plans.get(message.plan.id) : undefined;
+  }
+
+  /** Why the message the user just wrote does not fit the current mode, if it does not. */
+  private gate(prompt: string): PendingSend['kind'] | undefined {
+    const mode = this.conversation.mode ?? 'chat';
+    if (mode === 'chat') {
+      return looksLikeBigTask(prompt) ? 'planSuggest' : undefined;
+    }
+    if (mode === 'ask') {
+      return looksLikeRequestToAct(prompt) ? 'askSuggest' : undefined;
+    }
+    const def = enabledProviders().find((p) => p.id === this.conversation.providerId);
+    return isStrongPlanner(def, this.conversation.model ?? def?.defaultModel, this.conversation.effort)
+      ? undefined
+      : 'planWarn';
+  }
+
+  /** Answers the mode question: the held message is sent, switched or dropped. */
+  private async resolvePending(action: string): Promise<void> {
+    const pending = this.pending;
+    if (!pending) {
+      return;
+    }
+    if (action === 'cancel') {
+      this.pending = undefined;
+      this.post({ type: 'insert', text: pending.text });
+      this.postState();
+      return;
+    }
+    if (action === 'models') {
+      // The model menu opens in the webview; the message stays held until a model is picked.
+      return;
+    }
+    this.pending = undefined;
+    if (action === 'plan' || action === 'chat' || action === 'ask') {
+      this.conversation.mode = action;
+      await this.store.save(this.conversation);
+      // Switching mode can raise a new question, e.g. a weak model for the plan it just accepted.
+      const next = this.gate(pending.text);
+      if (next && next !== pending.kind) {
+        this.pending = { kind: next, text: pending.text };
+        this.postState();
+        return;
+      }
+    }
+    await this.send(pending.text, false, true);
+  }
+
+  /** Writes the plan an answer produced to disk and hangs a preview card on the message. */
+  private async capturePlan(): Promise<void> {
+    const message = this.conversation.messages[this.conversation.messages.length - 1];
+    if (!message || message.role !== 'assistant' || !message.text) {
+      return;
+    }
+    const meta = { providerId: message.providerId, model: message.model };
+    let { plan, text } = extractPlan(message.text, meta);
+    if (!plan) {
+      // A CLI agent in plan mode may hand its plan to a tool (Claude's ExitPlanMode) instead of
+      // printing it, so the block is looked for in the tool inputs too.
+      for (const value of message.tools?.flatMap((tool) => stringValues(tool.input)) ?? []) {
+        const found = extractPlan(value, meta);
+        if (found.plan) {
+          plan = found.plan;
+          break;
+        }
+      }
+    }
+    if (!plan) {
+      this.conversation.messages.push({
+        id: `m_${Date.now().toString(36)}_noplan`,
+        role: 'system',
+        text: t('plan.notStructured'),
+        createdAt: Date.now()
+      });
+      await this.store.save(this.conversation);
+      return;
+    }
+    let stored = plan;
+    try {
+      stored = savePlan(this.context, plan);
+    } catch (err) {
+      vscode.window.showWarningMessage(t('plan.saveFailed', { error: err instanceof Error ? err.message : String(err) }));
+    }
+    message.text = text;
+    message.plan = {
+      id: stored.id,
+      path: stored.path,
+      title: stored.title,
+      preview: planPreview(stored),
+      taskCount: stored.tasks.length,
+      waveCount: planWaves(stored).length
+    };
+    this.plans.set(stored.id, stored);
+    await this.store.save(this.conversation);
+  }
+
+  /** Reports a finished plan run in the transcript, so the chat keeps the whole story. */
+  private noteRun(plan: Plan, run: PlanRun): void {
+    const tasks = Object.values(run.tasks);
+    const done = tasks.filter((task) => task.status === 'done').length;
+    const failed = tasks.filter((task) => task.status === 'failed' || task.status === 'blocked').length;
+    this.conversation.messages.push({
+      id: `m_${Date.now().toString(36)}_run`,
+      role: 'system',
+      text: t('plan.runDone', { title: plan.title, done, total: tasks.length, failed }),
+      createdAt: Date.now()
+    });
+    void this.store.save(this.conversation);
+    this.postState();
+  }
+
+  private async send(text: string, handoff = false, force = false): Promise<void> {
     const files = handoff ? [] : this.attachmentView();
     const prompt = text.trim() || (files.length ? t('prompt.lookAtFiles') : '');
     if (!prompt || this.controller.running) {
       return;
     }
+    if (!handoff && !force) {
+      const question = this.gate(prompt);
+      if (question) {
+        this.pending = { kind: question, text: prompt };
+        this.postState();
+        return;
+      }
+    }
+    this.pending = undefined;
     this.handoff = undefined;
     if (!handoff) {
       this.attachments = [];
@@ -850,6 +1110,9 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       sent
     );
     this.post({ type: 'running', running: false });
+    if (!outcome.quota && (this.conversation.mode ?? 'chat') === 'plan') {
+      await this.capturePlan();
+    }
     if (outcome.quota) {
       await this.offerHandoff(from, outcome.quota);
     } else {
@@ -902,13 +1165,24 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 <link rel="stylesheet" href="${asset('chat.css')}" />
 <title>PolyMoly</title>
 </head>
-<body data-logo="${asset('icon.svg')}">
+<body data-logo="${asset('icon.svg')}" data-logo-animated="${asset('icon-animated.svg')}">
 <div id="root"></div>
 ${webviewI18nScript(nonce)}
 <script nonce="${nonce}" src="${asset('chat.js')}"></script>
 </body>
 </html>`;
   }
+}
+
+/** Every string inside a tool input, so a plan handed to a tool is still found. */
+function stringValues(value: unknown, depth = 0): string[] {
+  if (typeof value === 'string') {
+    return [value];
+  }
+  if (depth > 3 || !value || typeof value !== 'object') {
+    return [];
+  }
+  return Object.values(value as Record<string, unknown>).flatMap((entry) => stringValues(entry, depth + 1));
 }
 
 function normalizeMcp(raw: any): McpServerDef {
@@ -946,7 +1220,24 @@ export function randomNonce(): string {
 /** Built-in descriptions follow the UI language; user-edited ones stay as written. */
 function providerDescription(p: ProviderDef): string | undefined {
   const builtin = BUILTIN_PROVIDERS.find((b) => b.id === p.id);
-  return builtin && p.description === builtin.description ? tOptional(`desc.${p.id}`) ?? p.description : p.description;
+  const own =
+    builtin && p.description === builtin.description ? tOptional(`desc.${p.id}`) ?? p.description : p.description;
+  if (own) {
+    return own;
+  }
+  // API connectors carry no prose of their own; name the protocol and the host instead.
+  if (p.kind === 'http' && p.baseUrl) {
+    return `${t(p.api === 'anthropic' ? 'desc.anthropicApi' : 'desc.openaiApi')} · ${hostOf(p.baseUrl)}`;
+  }
+  return undefined;
+}
+
+function hostOf(url: string): string {
+  try {
+    return new URL(url).host;
+  } catch {
+    return url;
+  }
 }
 
 function localizedModels(p: ProviderDef): ModelDef[] {

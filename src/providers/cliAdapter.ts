@@ -4,8 +4,10 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
 import { attachmentList } from '../chat/attachments';
+import { CLAUDE_PERMISSION_MODES, normalizeClaudePermission, normalizeCodexSandbox, toLevel } from '../chat/permissions';
 import { AgentAdapter, AgentEvent, McpServerDef, ProviderDef, SendRequest, TokenUsage } from '../types';
 import { t } from '../i18n';
+import { needsApiKey } from './registry';
 
 function emptyUsage(): TokenUsage {
   return { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 };
@@ -13,11 +15,9 @@ function emptyUsage(): TokenUsage {
 
 let cachedPath: string | undefined;
 
-/**
- * PATH of the user's login shell plus common install dirs. VS Code started from the
- * Dock/Finder only inherits launchd's minimal PATH, so CLIs in ~/.local/bin etc. are missing.
- */
-function userPath(): string {
+/** PATH of the user's login shell plus common install dirs. VS Code started from the
+ * Dock/Finder only inherits launchd's minimal PATH, so CLIs in ~/.local/bin etc. are missing. */
+export function userPath(): string {
   if (cachedPath !== undefined) {
     return cachedPath;
   }
@@ -68,16 +68,40 @@ function resolveCommand(command: string): string {
 
 /** Runs an agent CLI as a child process and translates its JSONL output into AgentEvents. */
 export class CliAdapter implements AgentAdapter {
-  constructor(readonly def: ProviderDef) {}
+  constructor(
+    readonly def: ProviderDef,
+    private readonly getApiKey: (providerId: string) => Promise<string | undefined> = async () => undefined
+  ) {}
+
+  /** Provider env plus the stored API key; undefined when the provider needs a key and none is stored. */
+  private async providerEnv(): Promise<{ env: NodeJS.ProcessEnv; apiKey?: string } | undefined> {
+    const env: NodeJS.ProcessEnv = { ...process.env, PATH: userPath(), ...(this.def.env ?? {}) };
+    if (!needsApiKey(this.def)) {
+      return { env };
+    }
+    const apiKey = await this.getApiKey(this.def.id);
+    if (!apiKey) {
+      return undefined;
+    }
+    if (this.def.apiKeyEnv) {
+      // A leftover Anthropic key would take precedence over the token for the custom endpoint.
+      delete env.ANTHROPIC_API_KEY;
+      env[this.def.apiKeyEnv] = apiKey;
+    }
+    return { env, apiKey };
+  }
 
   async check(): Promise<{ ok: boolean; detail: string }> {
     const command = this.def.command;
     if (!command) {
       return { ok: false, detail: t('err.noCommand') };
     }
+    if (needsApiKey(this.def) && !(await this.getApiKey(this.def.id))) {
+      return { ok: false, detail: t('err.noApiKeyHint') };
+    }
     return new Promise((resolve) => {
-      const child = spawn(resolveCommand(command), ['--version'], {
-        env: { ...process.env, PATH: userPath() },
+      const child = spawn(resolveCommand(command), [...(this.def.commandArgs ?? []), '--version'], {
+        env: { ...process.env, PATH: userPath(), ...(this.def.env ?? {}) },
         shell: process.platform === 'win32'
       });
       let out = '';
@@ -102,15 +126,20 @@ export class CliAdapter implements AgentAdapter {
     }
 
     const protocol = this.def.protocol ?? 'claude-stream-json';
+    const provided = await this.providerEnv();
+    if (!provided) {
+      emit({ type: 'error', message: t('err.noApiKeyHint') });
+      emit({ type: 'done' });
+      return;
+    }
+    const { env } = provided;
     const { args, useStdin } =
       protocol === 'claude-stream-json' ? this.claudeArgs(req) : this.codexArgs(req);
-
-    const env: NodeJS.ProcessEnv = { ...process.env, PATH: userPath(), ...(this.def.env ?? {}) };
     if (protocol === 'claude-stream-json' && req.thinking === false) {
       env.MAX_THINKING_TOKENS = '0';
     }
 
-    const child = spawn(resolveCommand(command), args, {
+    const child = spawn(resolveCommand(command), [...(this.def.commandArgs ?? []), ...args], {
       cwd: req.cwd,
       env,
       shell: process.platform === 'win32'
@@ -124,8 +153,16 @@ export class CliAdapter implements AgentAdapter {
     }
     child.stdin.end();
 
+    let reportedError = false;
+    const emitParsed = (event: AgentEvent) => {
+      reportedError ||= event.type === 'error';
+      emit(event);
+    };
     const parse =
-      protocol === 'claude-stream-json' ? makeClaudeParser(emit) : makeCodexParser(emit);
+      protocol === 'claude-stream-json'
+        ? // The CLI prices every model at Anthropic rates, which is wrong on a foreign endpoint.
+          makeClaudeParser(emitParsed, !this.def.env?.ANTHROPIC_BASE_URL)
+        : makeCodexParser(emitParsed);
 
     let stdoutRest = '';
     child.stdout.setEncoding('utf8');
@@ -168,7 +205,8 @@ export class CliAdapter implements AgentAdapter {
             /* trailing partial line, ignore */
           }
         }
-        if (code !== 0 && !req.signal.aborted) {
+        // The exit code only repeats an error the output already reported.
+        if (code !== 0 && !req.signal.aborted && !reportedError) {
           emit({ type: 'error', message: stderr.trim() || `${command} endete mit Code ${code}.` });
         }
         resolve();
@@ -180,9 +218,15 @@ export class CliAdapter implements AgentAdapter {
   }
 
   private claudeArgs(req: SendRequest): { args: string[]; useStdin: boolean } {
-    const permissionMode = vscode.workspace
-      .getConfiguration('polyagent')
-      .get<string>('claude.permissionMode', 'acceptEdits');
+    // A stored value from the other protocol or an older CLI would abort the run right away.
+    const requested =
+      req.permission || vscode.workspace.getConfiguration('polyagent').get<string>('claude.permissionMode', 'acceptEdits');
+    let permissionMode = normalizeClaudePermission(requested);
+    // Auto mode's safety classifier runs on Anthropic models only; against another endpoint
+    // (Z.ai GLM, Kimi, …) the CLI would fall back to prompting, and headless prompts are denied.
+    if (permissionMode === 'auto' && this.def.env?.ANTHROPIC_BASE_URL) {
+      permissionMode = 'bypassPermissions';
+    }
 
     const args = [
       '-p',
@@ -193,6 +237,10 @@ export class CliAdapter implements AgentAdapter {
       '--permission-mode',
       permissionMode
     ];
+    if (toLevel(requested) === 'edit' && !CLAUDE_PERMISSION_MODES.includes(requested)) {
+      // "Edit files" level: the CLI's acceptEdits still offers Bash, so take it away explicitly.
+      args.push('--disallowedTools', 'Bash');
+    }
     if (req.model) {
       args.push('--model', req.model);
     }
@@ -217,15 +265,16 @@ export class CliAdapter implements AgentAdapter {
   }
 
   private codexArgs(req: SendRequest): { args: string[]; useStdin: boolean } {
-    const sandbox = vscode.workspace
-      .getConfiguration('polyagent')
-      .get<string>('codex.sandbox', 'workspace-write');
+    const sandbox = normalizeCodexSandbox(
+      req.permission || vscode.workspace.getConfiguration('polyagent').get<string>('codex.sandbox', 'workspace-write')
+    );
 
-    const args = ['exec'];
-    if (req.sessionId) {
-      args.push('resume', req.sessionId);
-    }
-    args.push('--json', '--sandbox', sandbox, '--skip-git-repo-check');
+    // `exec resume` is its own subcommand: it takes `--json`, `--skip-git-repo-check`, `-c`,
+    // `--model` and `--image`, but no `--sandbox`. The sandbox rides along as a config override,
+    // which both subcommands accept, so resumed turns keep the chat's own permission level.
+    const resuming = Boolean(req.sessionId);
+    const args = ['exec', ...(resuming ? ['resume'] : []), '--json', '--skip-git-repo-check'];
+    args.push(...(resuming ? ['-c', `sandbox_mode=${tomlString(sandbox)}`] : ['--sandbox', sandbox]));
     if (req.effort) {
       args.push('-c', `model_reasoning_effort=${tomlString(req.effort)}`);
     }
@@ -238,8 +287,12 @@ export class CliAdapter implements AgentAdapter {
     for (const image of files.filter((f) => f.kind === 'image')) {
       args.push(`--image=${image.path}`);
     }
-    // codex exec has no system-prompt flag; a new thread gets the instructions ahead of the prompt.
-    const preamble = req.instructions && !req.sessionId ? `<instructions>\n${req.instructions}\n</instructions>\n\n` : '';
+    if (req.sessionId) {
+      args.push(req.sessionId);
+    }
+    // codex exec has no system-prompt flag. Keep the compact, query-specific repo map on resumed
+    // turns too; otherwise a session would retain only the first request's map.
+    const preamble = req.instructions ? `<instructions>\n${req.instructions}\n</instructions>\n\n` : '';
     // `--image` takes several values; `--` keeps the prompt from being read as one.
     args.push('--', preamble + req.prompt + attachmentList(files.filter((f) => f.kind !== 'image')));
     return { args, useStdin: false };
@@ -247,7 +300,7 @@ export class CliAdapter implements AgentAdapter {
 }
 
 /** Parser for `claude -p --output-format stream-json --include-partial-messages`. */
-function makeClaudeParser(emit: (event: AgentEvent) => void): (msg: any) => void {
+function makeClaudeParser(emit: (event: AgentEvent) => void, reportCost = true): (msg: any) => void {
   let sawPartial = false;
 
   return (msg: any) => {
@@ -255,6 +308,12 @@ function makeClaudeParser(emit: (event: AgentEvent) => void): (msg: any) => void
       case 'system':
         if (msg.subtype === 'init' && msg.session_id) {
           emit({ type: 'session', sessionId: msg.session_id, model: msg.model });
+        } else if (msg.subtype === 'api_retry') {
+          // Otherwise a bad key or endpoint looks like a hang while the CLI backs off.
+          emit({
+            type: 'notice',
+            text: `API ${msg.error_status ?? ''} ${msg.error ?? ''} · retry ${msg.attempt}/${msg.max_retries}`.replace(/\s+/g, ' ')
+          });
         }
         return;
 
@@ -330,7 +389,7 @@ function makeClaudeParser(emit: (event: AgentEvent) => void): (msg: any) => void
         usage.outputTokens = raw.output_tokens ?? 0;
         usage.cacheReadTokens = raw.cache_read_input_tokens ?? 0;
         usage.cacheWriteTokens = raw.cache_creation_input_tokens ?? 0;
-        if (typeof msg.total_cost_usd === 'number') {
+        if (reportCost && typeof msg.total_cost_usd === 'number') {
           usage.costUsd = msg.total_cost_usd;
         }
         emit({ type: 'usage', usage });

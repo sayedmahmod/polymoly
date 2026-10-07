@@ -80,6 +80,9 @@
   const expandedThinking = new Set();
   /** Running turn's spinner: start time, current word and when it was picked. */
   let spinner = null;
+  /** Seconds left before an unanswered plan suggestion switches the mode by itself. */
+  let planCountdown = null;
+  let planTimer = null;
 
   let settingsOpen = false;
   let settingsTab = 'providers';
@@ -90,6 +93,8 @@
   const providerChecks = {};
   /** Filter text of each provider's model list in the settings modal. */
   const modelSearch = {};
+  /** Filter text of the provider list itself; the built-in API templates make it long. */
+  let providerSearch = '';
   /** MCP server being edited: null, or { previousName, name, server }. */
   let mcpDraft = null;
   /** Result line of the last skill install, or null. */
@@ -118,12 +123,15 @@
       '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 4l8 8M12 4l-8 8" stroke-linecap="round"/></svg>',
     chevron:
       '<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M6 3.5 10.5 8 6 12.5" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+    plan:
+      '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><rect x="3" y="2" width="10" height="12" rx="2"/><path d="M5.8 5.6h4.4M5.8 8h4.4M5.8 10.4h2.6" stroke-linecap="round"/></svg>',
     gear:
       '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2"><circle cx="8" cy="8" r="2.2"/><path d="M8 1.8v1.8M8 12.4v1.8M1.8 8h1.8M12.4 8h1.8M3.6 3.6l1.3 1.3M11.1 11.1l1.3 1.3M3.6 12.4l1.3-1.3M11.1 4.9l1.3-1.3" stroke-linecap="round"/></svg>'
   };
 
   const LOGO_URL = document.body.dataset.logo ?? '';
   const logo = (cls) => `<img class="${cls}" src="${LOGO_URL}" alt="" />`;
+  const HERO_LOGO_URL = document.body.dataset.logoAnimated || LOGO_URL;
 
   // ---------- helpers ----------
 
@@ -356,6 +364,228 @@
     };
   }
 
+  // One dial for every provider, least to most permissive; the extension maps each level onto
+  // the claude CLI, the codex sandbox or the local tools of API providers (src/chat/permissions.ts).
+  const PERMISSION_LEVELS = ['readonly', 'edit', 'write', 'auto', 'full'];
+  // Native CLI values and older stored values, as a level.
+  const LEGACY_PERMISSIONS = {
+    plan: 'readonly',
+    'read-only': 'readonly',
+    manual: 'edit',
+    dontAsk: 'edit',
+    acceptEdits: 'edit',
+    'workspace-write': 'auto',
+    bypassPermissions: 'full',
+    'danger-full-access': 'full'
+  };
+
+  /** Ordered permission levels for the current provider, or none if it has no such dial. */
+  function permissionLevels() {
+    const provider = currentProvider();
+    if (provider?.kind === 'http') {
+      return ['readonly', 'edit', 'write', 'auto'];
+    }
+    if (provider?.protocol === 'claude-stream-json') {
+      return ['readonly', 'edit', 'auto', 'full'];
+    }
+    if (provider?.protocol === 'codex-jsonl') {
+      return ['readonly', 'auto', 'full'];
+    }
+    return [];
+  }
+
+  /** A stored value as one of the current provider's levels, stepping down when it has no exact match. */
+  function permissionLevel(value) {
+    const levels = permissionLevels();
+    const level = PERMISSION_LEVELS.includes(value) ? value : LEGACY_PERMISSIONS[value];
+    if (!level || !levels.length) {
+      return undefined;
+    }
+    if (level === 'full') {
+      return levels[levels.length - 1];
+    }
+    const rank = PERMISSION_LEVELS.indexOf(level);
+    const fitting = levels.filter((candidate) => PERMISSION_LEVELS.indexOf(candidate) <= rank);
+    return fitting[fitting.length - 1] ?? levels[0];
+  }
+
+  /** Matches the fallback each adapter reads from `polyagent.*` when the chat has no override. */
+  function permissionDefault() {
+    const provider = currentProvider();
+    const defaults = state.permissionDefaults ?? {};
+    if (provider?.kind === 'http') {
+      return permissionLevel(defaults.http || 'write');
+    }
+    if (provider?.protocol === 'claude-stream-json') {
+      return permissionLevel(defaults.claude || 'acceptEdits');
+    }
+    if (provider?.protocol === 'codex-jsonl') {
+      return permissionLevel(defaults.codex || 'workspace-write');
+    }
+    return undefined;
+  }
+
+  /** The level the current chat runs with. */
+  function currentPermission() {
+    return permissionLevel(state.conversation?.permission) || permissionDefault();
+  }
+
+  function permissionLabel(mode) {
+    return t(`perm.${mode}`);
+  }
+
+  /** Composer chip for the current chat's permission level; hidden for HTTP providers. */
+  function permissionChip() {
+    const levels = permissionLevels();
+    // Plan and ask mode force read-only rights, so the chip would only lie about them.
+    if (!levels.length || currentMode() !== 'chat') {
+      return '';
+    }
+    const current = currentPermission();
+    return `<button class="chip ghost permission-chip" data-act="permission" title="${escapeHtml(t('palette.permission'))}">${escapeHtml(permissionLabel(current))}</button>`;
+  }
+
+  /** Per-chat override of the CLI's permission mode, e.g. "always ask" vs. "full access". */
+  function permissionItem(group) {
+    const levels = permissionLevels();
+    if (!levels.length) {
+      return null;
+    }
+    const current = currentPermission();
+    return {
+      group,
+      label: t('palette.permission'),
+      suffix: permissionLabel(current),
+      control: 'permission',
+      levels,
+      current,
+      run: () => {
+        const index = levels.indexOf(current);
+        post({ type: 'setPermission', mode: levels[(index + 1) % levels.length] });
+      }
+    };
+  }
+
+  const MODES = ['chat', 'plan', 'ask'];
+
+  function currentMode() {
+    return state.mode ?? state.conversation?.mode ?? 'chat';
+  }
+
+  /** Chat / Plan / Ask, the three ways a message is treated. */
+  function renderModes() {
+    const mode = currentMode();
+    return `<div class="modes">${MODES.map(
+      (name) =>
+        `<button class="mode-tab${name === mode ? ' active' : ''}" data-mode="${name}" title="${escapeHtml(t(`mode.${name}.hint`))}">${escapeHtml(t(`mode.${name}`))}</button>`
+    ).join('')}</div>`;
+  }
+
+  /** Counts a plan suggestion down; silence means yes, so the switch happens by itself. */
+  function syncPlanCountdown() {
+    const pending = state.pending;
+    const wanted = pending && pending.kind === 'planSuggest';
+    if (!wanted) {
+      clearInterval(planTimer);
+      planTimer = null;
+      planCountdown = null;
+      return;
+    }
+    if (planTimer) {
+      return;
+    }
+    planCountdown = 30;
+    planTimer = setInterval(() => {
+      planCountdown -= 1;
+      const label = document.querySelector('.pending-count');
+      if (label) {
+        label.textContent = String(Math.max(0, planCountdown));
+      }
+      if (planCountdown <= 0) {
+        clearInterval(planTimer);
+        planTimer = null;
+        resolvePending('plan');
+      }
+    }, 1000);
+  }
+
+  function resolvePending(action) {
+    clearInterval(planTimer);
+    planTimer = null;
+    planCountdown = null;
+    if (action === 'models') {
+      menu = 'models';
+      render();
+      return;
+    }
+    if (action !== 'cancel') {
+      streaming = true;
+    }
+    post({ type: 'pendingResolve', action });
+  }
+
+  /** The card that asks whether the mode still fits the message the user just wrote. */
+  function renderPending() {
+    const pending = state.pending;
+    if (!pending || state.running) {
+      return '';
+    }
+    const excerpt = pending.text.replace(/\s+/g, ' ').slice(0, 160);
+    const quote = `<div class="pending-quote">${escapeHtml(excerpt)}${pending.text.length > 160 ? '…' : ''}</div>`;
+
+    if (pending.kind === 'planSuggest') {
+      return `<div class="pending">
+        <div class="pending-head">${escapeHtml(t('pending.planHead'))}</div>
+        ${quote}
+        <div class="pending-body">${t('pending.planBody', { seconds: `<span class="pending-count">${planCountdown ?? 30}</span>` })}</div>
+        <div class="handoff-actions">
+          <button class="btn primary" data-pending="plan">${escapeHtml(t('pending.planNow'))}</button>
+          <button class="btn" data-pending="chat">${escapeHtml(t('pending.stayChat'))}</button>
+          <button class="btn ghost" data-pending="cancel">${escapeHtml(t('common.cancel'))}</button>
+        </div>
+      </div>`;
+    }
+
+    if (pending.kind === 'planWarn') {
+      return `<div class="pending warn">
+        <div class="pending-head">${escapeHtml(t('pending.weakHead', { model: pending.modelLabel ?? '' }))}</div>
+        <div class="pending-body">${escapeHtml(t('pending.weakBody'))}</div>
+        ${quote}
+        <div class="handoff-actions">
+          <button class="btn primary" data-pending="models">${escapeHtml(t('pending.switchModel'))}</button>
+          <button class="btn" data-pending="plan">${escapeHtml(t('pending.planAnyway'))}</button>
+          <button class="btn ghost" data-pending="cancel">${escapeHtml(t('common.cancel'))}</button>
+        </div>
+      </div>`;
+    }
+
+    return `<div class="pending">
+      <div class="pending-head">${escapeHtml(t('pending.askHead'))}</div>
+      ${quote}
+      <div class="pending-body">${escapeHtml(t('pending.askBody'))}</div>
+      <div class="handoff-actions">
+        <button class="btn primary" data-pending="chat">${escapeHtml(t('pending.toChat'))}</button>
+        <button class="btn" data-pending="plan">${escapeHtml(t('pending.toPlan'))}</button>
+        <button class="btn" data-pending="ask">${escapeHtml(t('pending.askAnyway'))}</button>
+        <button class="btn ghost" data-pending="cancel">${escapeHtml(t('common.cancel'))}</button>
+      </div>
+    </div>`;
+  }
+
+  /** Preview card of a written plan; the full plan opens in the editor area. */
+  function renderPlanCard(message) {
+    const plan = message.plan;
+    return `<div class="plan-card" data-plan-message="${escapeHtml(message.id)}" data-plan-path="${escapeHtml(plan.path ?? '')}">
+      <div class="plan-card-head">${ICONS.plan}<span>${escapeHtml(t('plan.title'))}</span>
+        <span class="plan-card-meta">${escapeHtml(t('plan.cardMeta', { tasks: plan.taskCount, waves: plan.waveCount }))}</span>
+      </div>
+      <div class="plan-card-title">${escapeHtml(plan.title)}</div>
+      <div class="plan-card-preview">${renderMarkdown(plan.preview)}</div>
+      <div class="plan-card-fade"></div>
+      <button class="btn plan-card-open" data-plan-open="1">${escapeHtml(t('plan.openFull'))} →</button>
+    </div>`;
+  }
+
   function paletteItems() {
     const conversation = state.conversation ?? {};
     const mcpCount = settings ? Object.keys(settings.mcpServers ?? {}).length : null;
@@ -377,8 +607,15 @@
           render();
         }
       },
+      {
+        group: t('group.model'),
+        label: t('palette.mode'),
+        value: t(`mode.${currentMode()}`),
+        run: () => closeAnd(() => post({ type: 'setMode', mode: MODES[(MODES.indexOf(currentMode()) + 1) % MODES.length] }))
+      },
       effortItem(t('group.model')),
       thinkingItem(t('group.model')),
+      permissionItem(t('group.model')),
       {
         group: t('group.model'),
         label: t('palette.showTools'),
@@ -476,11 +713,13 @@
       ${renderAttachments()}
       <textarea rows="2" dir="auto" placeholder="${escapeHtml(t('composer.placeholder', { name: currentProvider()?.label ?? 'Agent' }))}">${escapeHtml(draft)}</textarea>
       <div class="composer-bar">
+        ${renderModes()}
         <button class="icon-button" data-act="attach" title="${escapeHtml(t('composer.attach'))}">${ICONS.plus}</button>
         <button class="icon-button${menu === 'palette' ? ' active' : ''}" data-act="palette" title="${escapeHtml(t('composer.actions'))}">${ICONS.slash}</button>
         <button class="chip${menu === 'models' ? ' active' : ''}" data-act="model" title="${escapeHtml(currentProvider()?.label ?? '')}">${escapeHtml(currentModelLabel())}${
           effort ? `<span class="muted">${escapeHtml(effortLabel(effort))}</span>` : ''
         }</button>
+        ${permissionChip()}
         <div class="spacer"></div>
         <button class="send${state.running ? ' stop' : ''}" data-act="${state.running ? 'abort' : 'send'}" title="${escapeHtml(t(state.running ? 'composer.stop' : 'composer.send'))}">${state.running ? ICONS.stop : ICONS.arrowUp}</button>
       </div>
@@ -563,7 +802,7 @@
     const messages = state.conversation?.messages ?? [];
     if (!messages.length) {
       return `<div class="empty">
-        ${logo('hero-logo')}
+        <img class="hero-logo" src="${HERO_LOGO_URL}" alt="" />
         <div class="wordmark">PolyMoly</div>
       </div>`;
     }
@@ -583,7 +822,7 @@
         return tag + renderMessage(message);
       })
       .join('');
-    return `<div class="messages">${html}${streaming ? renderSpinner() : ''}${renderHandoff()}</div>`;
+    return `<div class="messages">${html}${streaming ? renderSpinner() : ''}${renderHandoff()}${renderPending()}</div>`;
   }
 
   function randomWord(previous) {
@@ -734,6 +973,9 @@
     if (message.text) {
       steps.push(`<div class="step step-text"><div class="msg-assistant" dir="auto">${renderMarkdown(message.text)}</div></div>`);
     }
+    if (message.plan) {
+      steps.push(`<div class="step step-plan">${renderPlanCard(message)}</div>`);
+    }
     if (message.error) {
       steps.push(`<div class="step step-error"><div class="msg-error">${escapeHtml(message.error)}</div></div>`);
     }
@@ -752,6 +994,14 @@
         .map(
           (level) =>
             `<div class="dot${level === item.current ? ' on' : ''}${level === 'max' || level === 'ultra' ? ' max' : ''}" data-effort="${escapeHtml(level)}" title="${escapeHtml(effortLabel(level))}"></div>`
+        )
+        .join('')}</div>`;
+    }
+    if (item.control === 'permission') {
+      return `<div class="dots">${item.levels
+        .map(
+          (level) =>
+            `<div class="dot${level === item.current ? ' on' : ''}${level === item.levels[item.levels.length - 1] ? ' max' : ''}" data-permission="${escapeHtml(level)}" title="${escapeHtml(permissionLabel(level))}"></div>`
         )
         .join('')}</div>`;
     }
@@ -982,7 +1232,11 @@
 
   /** Effort and thinking controls, only where the current model supports them. */
   function modelOptions() {
-    return [effortItem(t('group.options')), currentProvider()?.supportsThinking ? thinkingItem(t('group.options')) : null].filter(Boolean);
+    return [
+      effortItem(t('group.options')),
+      currentProvider()?.supportsThinking ? thinkingItem(t('group.options')) : null,
+      permissionItem(t('group.options'))
+    ].filter(Boolean);
   }
 
   // ---------- settings modal ----------
@@ -1023,6 +1277,10 @@
     });
     const focused = /** @type {HTMLElement|null} */ (document.activeElement)?.dataset?.keep;
     const bodyScroll = modalRoot.querySelector('.modal-body')?.scrollTop ?? 0;
+    const modelScroll = {};
+    modalRoot.querySelectorAll('.model-rows').forEach((element) => {
+      modelScroll[/** @type {HTMLElement} */ (element).dataset.provider ?? ''] = element.scrollTop;
+    });
 
     const tabs = [
       ['providers', t('tab.providers')],
@@ -1073,6 +1331,9 @@
     if (body) {
       body.scrollTop = bodyScroll;
     }
+    modalRoot.querySelectorAll('.model-rows').forEach((element) => {
+      element.scrollTop = modelScroll[/** @type {HTMLElement} */ (element).dataset.provider ?? ''] ?? 0;
+    });
     wireModal();
   }
 
@@ -1094,6 +1355,10 @@
 
   function renderProvidersTab() {
     const cards = settings.providers.map(renderProviderCard).join('');
+    const filter =
+      settings.providers.length > 8
+        ? `<input class="input provider-search" placeholder="${escapeHtml(t('providers.filter'))}" />`
+        : '';
     const addForm = addingProvider
       ? `<div class="card">
           <div class="card-title">${escapeHtml(t('providers.newTitle'))}</div>
@@ -1109,7 +1374,7 @@
           </div>
         </div>`
       : `<button class="btn wide" data-modal-act="add-provider">${escapeHtml(t('providers.add'))}</button>`;
-    return `<div class="tab-intro">${escapeHtml(t('providers.intro'))}</div>${cards}${addForm}`;
+    return `<div class="tab-intro">${escapeHtml(t('providers.intro'))}</div>${filter}${cards}${addForm}`;
   }
 
   function renderProviderCard(provider) {
@@ -1120,23 +1385,26 @@
 
     let body = '';
     if (open) {
+      const apiKey = field(
+        t('field.apiKey'),
+        `<div class="inline">${textInput(`p.${provider.id}.apiKey`, '', `type="password" autocomplete="off" placeholder="${escapeHtml(t(provider.hasApiKey ? 'key.saved' : 'key.unset'))}"`)}
+          <button class="btn" data-modal-act="secret-save" data-provider="${escapeHtml(provider.id)}" data-which="api">${escapeHtml(t('common.save'))}</button>
+          ${provider.hasApiKey ? `<button class="btn ghost" data-modal-act="secret-clear" data-provider="${escapeHtml(provider.id)}" data-which="api">${escapeHtml(t('common.delete'))}</button>` : ''}</div>`,
+        provider.apiKeyEnv ? t('field.cliKeyHint', { env: provider.apiKeyEnv }) : undefined
+      );
       const connection =
         provider.kind === 'cli'
-          ? field(
+          ? `${field(
               t('field.cliCommand'),
               textInput(`p.${provider.id}.command`, provider.command, `data-save="providerField" data-provider="${escapeHtml(provider.id)}" data-field="command"`),
-              t('field.cliHint')
-            )
+              t(provider.needsApiKey ? 'field.cliKeyCommandHint' : 'field.cliHint')
+            )}
+            ${provider.needsApiKey ? apiKey : ''}`
           : `${field(
               t('field.baseUrl'),
               textInput(`p.${provider.id}.baseUrl`, provider.baseUrl, `data-save="providerField" data-provider="${escapeHtml(provider.id)}" data-field="baseUrl"`)
             )}
-            ${field(
-              t('field.apiKey'),
-              `<div class="inline">${textInput(`p.${provider.id}.apiKey`, '', `type="password" autocomplete="off" placeholder="${escapeHtml(t(provider.hasApiKey ? 'key.saved' : 'key.unset'))}"`)}
-                <button class="btn" data-modal-act="secret-save" data-provider="${escapeHtml(provider.id)}" data-which="api">${escapeHtml(t('common.save'))}</button>
-                ${provider.hasApiKey ? `<button class="btn ghost" data-modal-act="secret-clear" data-provider="${escapeHtml(provider.id)}" data-which="api">${escapeHtml(t('common.delete'))}</button>` : ''}</div>`
-            )}`;
+            ${apiKey}`;
 
       const admin = field(
         t('field.adminKey'),
@@ -1193,7 +1461,8 @@
       </div>`;
     }
 
-    return `<div class="card${provider.enabled ? '' : ' off'}">
+    const search = `${provider.label} ${provider.id} ${provider.baseUrl ?? ''} ${provider.command ?? ''}`.toLowerCase();
+    return `<div class="card provider-card${provider.enabled ? '' : ' off'}" data-search="${escapeHtml(search)}">
       <div class="card-head" data-modal-act="expand" data-provider="${escapeHtml(provider.id)}">
         <span class="chev${open ? ' open' : ''}">${ICONS.chevron}</span>
         <div class="card-head-text">
@@ -1313,10 +1582,12 @@
       ${field(
         t('general.claudePermission'),
         select('g.claudePermissionMode', general.claudePermissionMode, [
-          ['default', `default (${t('general.permDefault')})`],
+          ['plan', `plan (${t('general.permPlan')})`],
+          ['manual', `manual (${t('general.permManual')})`],
+          ['dontAsk', `dontAsk (${t('general.permDontAsk')})`],
           ['acceptEdits', `acceptEdits (${t('general.permAcceptEdits')})`],
-          ['bypassPermissions', `bypassPermissions (${t('general.permBypass')})`],
-          ['plan', `plan (${t('general.permPlan')})`]
+          ['auto', `auto (${t('general.permAuto')})`],
+          ['bypassPermissions', `bypassPermissions (${t('general.permBypass')})`]
         ])
       )}
       ${field(
@@ -1326,6 +1597,25 @@
           ['workspace-write', 'workspace-write'],
           ['danger-full-access', 'danger-full-access']
         ])
+      )}
+      ${field(
+        t('general.httpPermission'),
+        select('g.httpPermissionMode', general.httpPermissionMode ?? 'write', [
+          ['readonly', `readonly (${t('general.permReadonly')})`],
+          ['edit', `edit (${t('general.permEditOnly')})`],
+          ['write', `write (${t('general.permWrite')})`],
+          ['auto', `auto (${t('general.permFullAuto')})`]
+        ])
+      )}
+      ${field(
+        t('general.planParallel'),
+        textInput('g.planMaxParallelTasks', general.planMaxParallelTasks ?? 4, 'type="number" min="1" max="8" step="1"'),
+        t('general.planParallelHint')
+      )}
+      ${field(
+        t('general.contextBudget'),
+        textInput('g.contextTokenBudget', general.contextTokenBudget ?? 1400, 'type="number" min="400" max="8000" step="100"'),
+        t('general.contextBudgetHint')
       )}
     </div></div>`;
   }
@@ -1365,13 +1655,27 @@
       });
     });
 
-    modalRoot.querySelectorAll('select[data-keep^="g."]').forEach((element) => {
+    modalRoot.querySelectorAll('select[data-keep^="g."], input[data-keep^="g."]').forEach((element) => {
       const input = /** @type {HTMLSelectElement} */ (element);
       input.addEventListener('change', () => {
         input.dataset.dirty = '';
         saveSetting({ op: 'general', key: (input.dataset.keep ?? '').slice(2), value: input.value });
       });
     });
+
+    const providerFilter = /** @type {HTMLInputElement|null} */ (modalRoot.querySelector('.provider-search'));
+    if (providerFilter) {
+      const apply = () => {
+        const needle = providerFilter.value.trim().toLowerCase();
+        providerSearch = providerFilter.value;
+        modalRoot
+          .querySelectorAll('.provider-card')
+          .forEach((card) => card.toggleAttribute('hidden', Boolean(needle) && !(/** @type {HTMLElement} */ (card).dataset.search ?? '').includes(needle)));
+      };
+      providerFilter.value = providerSearch;
+      apply();
+      providerFilter.addEventListener('input', apply);
+    }
 
     modalRoot.querySelectorAll('.model-search').forEach((element) => {
       const input = /** @type {HTMLInputElement} */ (element);
@@ -1663,6 +1967,11 @@
         } else if (act === 'model') {
           menu = menu === 'models' ? null : 'models';
           render();
+        } else if (act === 'permission') {
+          const levels = permissionLevels();
+          const current = currentPermission();
+          const index = levels.indexOf(current);
+          post({ type: 'setPermission', mode: levels[(index + 1) % levels.length] });
         } else if (act === 'refreshLimits') {
           post({ type: 'refreshLimits' });
         }
@@ -1686,6 +1995,39 @@
 
     wireToolHeads();
     wireHandoff();
+    wireModes();
+  }
+
+  /** Mode tabs, mode questions and plan cards, re-bound after every repaint. */
+  function wireModes() {
+    document.querySelectorAll('.mode-tab').forEach((element) => {
+      element.addEventListener('click', () => {
+        const mode = element.getAttribute('data-mode');
+        if (mode && mode !== currentMode()) {
+          post({ type: 'setMode', mode });
+        }
+      });
+    });
+    document.querySelectorAll('[data-pending]').forEach((element) => {
+      element.addEventListener('click', () => resolvePending(element.getAttribute('data-pending')));
+    });
+    document.querySelectorAll('.plan-card').forEach((element) => {
+      const open = () =>
+        post({
+          type: 'openPlan',
+          messageId: element.getAttribute('data-plan-message'),
+          path: element.getAttribute('data-plan-path') || undefined
+        });
+      element.querySelector('[data-plan-open]')?.addEventListener('click', (event) => {
+        event.stopPropagation();
+        open();
+      });
+      element.addEventListener('click', () => {
+        if (!window.getSelection()?.toString()) {
+          open();
+        }
+      });
+    });
   }
 
   function wireMenuItems() {
@@ -1710,6 +2052,13 @@
       element.addEventListener('click', (event) => {
         event.stopPropagation();
         post({ type: 'setEffort', effort: /** @type {HTMLElement} */ (element).dataset.effort });
+      });
+    });
+
+    document.querySelectorAll('.dot[data-permission]').forEach((element) => {
+      element.addEventListener('click', (event) => {
+        event.stopPropagation();
+        post({ type: 'setPermission', mode: /** @type {HTMLElement} */ (element).dataset.permission });
       });
     });
   }
@@ -1773,6 +2122,7 @@
     scroll.innerHTML = renderBody();
     wireToolHeads();
     wireHandoff();
+    wireModes();
     if (atBottom) {
       scroll.scrollTop = scroll.scrollHeight;
     }
@@ -1885,6 +2235,7 @@
       }
       streaming = state.running;
       render();
+      syncPlanCountdown();
     } else if (message.type === 'historyList') {
       historyItems = message.items;
       historyCurrentId = message.currentId;

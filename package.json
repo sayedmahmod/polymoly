@@ -2,7 +2,7 @@
   "name": "polymoly",
   "displayName": "PolyMoly",
   "description": "%description%",
-  "version": "0.1.1",
+  "version": "0.1.10",
   "publisher": "Sayed",
   "license": "MIT",
   "repository": {
@@ -170,10 +170,12 @@
         "polyagent.claude.permissionMode": {
           "type": "string",
           "enum": [
-            "default",
+            "plan",
+            "manual",
+            "dontAsk",
             "acceptEdits",
-            "bypassPermissions",
-            "plan"
+            "auto",
+            "bypassPermissions"
           ],
           "default": "acceptEdits",
           "markdownDescription": "%cfg.claudePermission%"
@@ -187,6 +189,37 @@
           ],
           "default": "workspace-write",
           "markdownDescription": "%cfg.codexSandbox%"
+        },
+        "polyagent.http.permissionMode": {
+          "type": "string",
+          "enum": [
+            "readonly",
+            "edit",
+            "write",
+            "auto"
+          ],
+          "enumItemLabels": [
+            "%cfg.httpPermReadonly%",
+            "%cfg.httpPermEdit%",
+            "%cfg.httpPermWrite%",
+            "%cfg.httpPermAuto%"
+          ],
+          "default": "write",
+          "markdownDescription": "%cfg.httpPermission%"
+        },
+        "polyagent.plan.maxParallelTasks": {
+          "type": "number",
+          "default": 4,
+          "minimum": 1,
+          "maximum": 8,
+          "markdownDescription": "%cfg.planParallel%"
+        },
+        "polyagent.context.tokenBudget": {
+          "type": "number",
+          "default": 1400,
+          "minimum": 400,
+          "maximum": 8000,
+          "markdownDescription": "%cfg.contextBudget%"
         },
         "polyagent.usage.days": {
           "type": "number",
@@ -203,6 +236,7 @@
   },
   "scripts": {
     "build": "node esbuild.mjs",
+    "compile": "node esbuild.mjs",
     "watch": "node esbuild.mjs --watch",
     "typecheck": "tsc --noEmit",
     "vscode:prepublish": "node esbuild.mjs --production"
