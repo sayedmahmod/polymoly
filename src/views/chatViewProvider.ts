@@ -34,6 +34,7 @@ import {
   setSkillEnabled,
   skillsRoot
 } from '../skills/skills';
+import { SubagentBridge } from '../agents/bridge';
 import { LimitsService } from '../usage/limits';
 import { Attachment, McpServerDef, ModelDef, ProviderDef } from '../types';
 import { UsagePanel } from './usagePanel';
@@ -85,7 +86,9 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     private readonly planPanel: PlanPanel
   ) {
     planPanel.onRunFinished = (plan, run) => this.noteRun(plan, run);
-    this.controller = new ChatController(context.secrets, store, context.globalState);
+    const bridge = new SubagentBridge(context.secrets, context.asAbsolutePath('dist/subagent-mcp.js'));
+    context.subscriptions.push(bridge);
+    this.controller = new ChatController(context.secrets, store, context.globalState, bridge);
     this.limits = new LimitsService(context.globalState, context.secrets);
     const defaultProvider = vscode.workspace
       .getConfiguration('polyagent')

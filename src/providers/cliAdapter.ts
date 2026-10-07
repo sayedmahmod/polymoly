@@ -1,4 +1,5 @@
 import { execFileSync, spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -8,6 +9,8 @@ import { CLAUDE_PERMISSION_MODES, normalizeClaudePermission, normalizeCodexSandb
 import { AgentAdapter, AgentEvent, McpServerDef, ProviderDef, SendRequest, TokenUsage } from '../types';
 import { t } from '../i18n';
 import { needsApiKey } from './registry';
+import { killTree, OWN_PROCESS_GROUP } from './processTree';
+import { LIST_AGENTS_TOOL, SPAWN_AGENT_TOOL, SUBAGENT_MCP_NAME } from '../agents/spawnSchema';
 
 function emptyUsage(): TokenUsage {
   return { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 };
@@ -142,10 +145,12 @@ export class CliAdapter implements AgentAdapter {
     const child = spawn(resolveCommand(command), [...(this.def.commandArgs ?? []), ...args], {
       cwd: req.cwd,
       env,
-      shell: process.platform === 'win32'
+      shell: process.platform === 'win32',
+      detached: OWN_PROCESS_GROUP
     });
 
-    const onAbort = () => child.kill('SIGTERM');
+    // The CLI's own tool commands and MCP servers must stop with it.
+    const onAbort = () => killTree(child);
     req.signal.addEventListener('abort', onAbort, { once: true });
 
     if (useStdin) {
@@ -259,6 +264,13 @@ export class CliAdapter implements AgentAdapter {
     const mcpFile = writeClaudeMcpConfig(req.mcpServers);
     if (mcpFile) {
       args.push('--mcp-config', mcpFile);
+    }
+    if (req.mcpServers?.[SUBAGENT_MCP_NAME]) {
+      // Headless runs deny every permission prompt; the bridge enforces the subagent's rights itself.
+      args.push(
+        '--allowedTools',
+        `mcp__${SUBAGENT_MCP_NAME}__${SPAWN_AGENT_TOOL},mcp__${SUBAGENT_MCP_NAME}__${LIST_AGENTS_TOOL}`
+      );
     }
     args.push(...(this.def.extraArgs ?? []));
     return { args, useStdin: true };
@@ -569,11 +581,21 @@ function writeClaudeMcpConfig(servers: Record<string, McpServerDef> | undefined)
   }
   const mcpServers: Record<string, unknown> = {};
   for (const [name, server] of entries) {
-    const { disabled: _disabled, ...rest } = server;
-    mcpServers[name] = 'url' in rest ? rest : { type: 'stdio', ...rest };
+    if ('url' in server) {
+      const { disabled: _disabled, ...rest } = server;
+      mcpServers[name] = rest;
+    } else {
+      const { disabled: _disabled, toolTimeoutSec: _timeout, ...rest } = server;
+      mcpServers[name] = { type: 'stdio', ...rest };
+    }
   }
-  const file = path.join(os.tmpdir(), `polyagent-mcp-${process.pid}.json`);
-  fs.writeFileSync(file, JSON.stringify({ mcpServers }), { mode: 0o600 });
+  // Parallel runs (plan tasks, subagents) carry different sessions: one file per distinct config.
+  const content = JSON.stringify({ mcpServers });
+  const hash = createHash('sha1').update(content).digest('hex').slice(0, 12);
+  const file = path.join(os.tmpdir(), `polyagent-mcp-${process.pid}-${hash}.json`);
+  if (!fs.existsSync(file)) {
+    fs.writeFileSync(file, content, { mode: 0o600 });
+  }
   return file;
 }
 
@@ -602,6 +624,9 @@ function codexMcpArgs(servers: Record<string, McpServerDef> | undefined): string
       args.push('-c', `${key}.args=[${(server.args ?? []).map(tomlString).join(', ')}]`);
       if (server.env && Object.keys(server.env).length) {
         args.push('-c', `${key}.env=${tomlTable(server.env)}`);
+      }
+      if (server.toolTimeoutSec) {
+        args.push('-c', `${key}.tool_timeout_sec=${server.toolTimeoutSec}`);
       }
     }
   }

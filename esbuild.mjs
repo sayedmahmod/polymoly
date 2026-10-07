@@ -16,6 +16,19 @@ const extensionContext = await esbuild.context({
   logLevel: 'info'
 });
 
+// Stdio MCP server the CLI agents load to start subagents; runs outside the extension host.
+const subagentMcpContext = await esbuild.context({
+  entryPoints: ['src/agents/mcpServer.ts'],
+  bundle: true,
+  format: 'cjs',
+  platform: 'node',
+  target: 'node20',
+  outfile: 'dist/subagent-mcp.js',
+  sourcemap: !production,
+  minify: production,
+  logLevel: 'info'
+});
+
 const webviewContext = await esbuild.context({
   entryPoints: ['src/webview/main.ts'],
   bundle: true,
@@ -29,8 +42,8 @@ const webviewContext = await esbuild.context({
 });
 
 if (watch) {
-  await Promise.all([extensionContext.watch(), webviewContext.watch()]);
+  await Promise.all([extensionContext.watch(), subagentMcpContext.watch(), webviewContext.watch()]);
 } else {
-  await Promise.all([extensionContext.rebuild(), webviewContext.rebuild()]);
-  await Promise.all([extensionContext.dispose(), webviewContext.dispose()]);
+  await Promise.all([extensionContext.rebuild(), subagentMcpContext.rebuild(), webviewContext.rebuild()]);
+  await Promise.all([extensionContext.dispose(), subagentMcpContext.dispose(), webviewContext.dispose()]);
 }

@@ -13,6 +13,9 @@ import { normalizeHttpPermission, translatePermission } from './permissions';
 import { AgentPermission, describeToolCall } from './localTools';
 import { t } from '../i18n';
 import { projectContext } from '../context/projectContext';
+import { SubagentBridge } from '../agents/bridge';
+import { parseSpawnInput, SUBAGENT_MCP_NAME } from '../agents/spawnSchema';
+import { permissionLevelFor, runSubagent, SubagentParent, subagentInstructions } from '../agents/subagents';
 
 const RATE_LIMIT_KEY = 'polyagent.rateLimits';
 
@@ -78,7 +81,9 @@ export class ChatController {
   constructor(
     private readonly secrets: vscode.SecretStorage,
     private readonly store: ConversationStore,
-    private readonly globalState: vscode.Memento
+    private readonly globalState: vscode.Memento,
+    /** Gives the CLI agents `spawn_agent` over MCP. */
+    private readonly bridge?: SubagentBridge
   ) {}
 
   private async rememberRateLimit(providerId: string, info: RateLimitInfo): Promise<void> {
@@ -146,7 +151,8 @@ export class ChatController {
     }
 
     const adapter = createAdapter(def, this.secrets);
-    this.abort = new AbortController();
+    const abort = new AbortController();
+    this.abort = abort;
 
     const history = conversation.messages
       .filter((m): m is typeof m & { role: 'user' | 'assistant' } => m !== assistant && m.role !== 'system' && (Boolean(m.text) || m.role === 'user'))
@@ -198,6 +204,26 @@ export class ChatController {
       fullPrompt = inlineMentionedFiles(fullPrompt, cwd);
     }
 
+    // Every agent may start subagents on any provider, never with more rights than its own.
+    const cliPermission = def.kind === 'cli' ? permissionForMode(mode, def) ?? conversation.permission : undefined;
+    const subagentParent: SubagentParent = {
+      level: permissionLevelFor(def, httpPermission ?? cliPermission),
+      cwd,
+      confirm: (name, input) => this.confirmTool(conversation.id, name, input)
+    };
+    let mcpServers = def.kind === 'cli' ? activeMcpServers() : undefined;
+    let bridgeSession: string | undefined;
+    if (mcpServers && this.bridge) {
+      try {
+        const opened = await this.bridge.open({ ...subagentParent, signal: abort.signal });
+        bridgeSession = opened.id;
+        mcpServers = { ...mcpServers, [SUBAGENT_MCP_NAME]: opened.server };
+      } catch {
+        /* no local port: the turn runs without subagents */
+      }
+    }
+    const canSpawn = def.kind === 'http' || Boolean(bridgeSession);
+
     let rejectedUntil: number | undefined;
     const request: SendRequest = {
       prompt: fullPrompt,
@@ -207,26 +233,40 @@ export class ChatController {
       sessionId: conversation.providerSessions[def.id],
       effort: effortFor(def, model, conversation.effort),
       thinking: conversation.thinking,
-      permission: def.kind === 'cli' ? permissionForMode(mode, def) ?? conversation.permission : undefined,
+      permission: cliPermission,
       attachments,
-      mcpServers: def.kind === 'cli' ? activeMcpServers() : undefined,
+      mcpServers,
       localTools:
         def.kind === 'http' && httpPermission
           ? { mode: httpPermission, confirm: (name, input) => this.confirmTool(conversation.id, name, input) }
+          : undefined,
+      spawnAgent:
+        def.kind === 'http'
+          ? async (input, signal) => {
+              const spec = parseSpawnInput(input);
+              return spec
+                ? runSubagent(spec, subagentParent, this.secrets, signal)
+                : { output: '`provider` and `prompt` are required.', isError: true };
+            }
           : undefined,
       instructions: [
         def.kind === 'http' ? projectHeader(cwd, httpPermission) : undefined,
         instructionsForMode(mode),
         repositoryMap.text,
-        skillsInstructions(skills, def.kind === 'cli')
+        skillsInstructions(skills, def.kind === 'cli'),
+        canSpawn ? subagentInstructions(def) : undefined
       ]
         .filter(Boolean)
         .join('\n\n') || undefined,
       skillsDir: def.kind === 'cli' && skills.length ? skillsRoot() : undefined,
-      signal: this.abort.signal
+      signal: abort.signal
     };
 
     const emit = (event: AgentEvent) => {
+      // After Stop, whatever the provider still sends must not reach the transcript.
+      if (abort.signal.aborted && event.type !== 'done') {
+        return;
+      }
       if (event.type === 'rate_limit') {
         void this.rememberRateLimit(conversation.providerId, event.info);
         if (event.info.status === 'rejected') {
@@ -241,14 +281,22 @@ export class ChatController {
       handlers.onEvent(event, assistant);
     };
 
+    // Stop ends the turn right away, even when the provider is slow to wind down.
+    const stopped = new Promise<void>((resolve) => abort.signal.addEventListener('abort', () => resolve(), { once: true }));
     try {
-      await adapter.send(request, emit);
+      await Promise.race([adapter.send(request, emit), stopped]);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       emit({ type: 'error', message });
       emit({ type: 'done' });
     } finally {
-      this.abort = undefined;
+      // A newer turn may already own the controller; only clear our own.
+      if (this.abort === abort) {
+        this.abort = undefined;
+      }
+      if (bridgeSession) {
+        this.bridge?.close(bridgeSession);
+      }
       await this.store.save(conversation);
     }
 
@@ -314,7 +362,7 @@ const ACCESS_NOTE: Record<AgentPermission, string> = {
 };
 
 /** So an HTTP provider knows what project it is talking about, and what it may touch. */
-function projectHeader(cwd: string, permission: AgentPermission | undefined): string {
+export function projectHeader(cwd: string, permission: AgentPermission | undefined): string {
   if (!permission) {
     return `# Project\n\nWorkspace: ${path.basename(cwd)} (${cwd}). You have no file or shell access; work only from the conversation and any attached files.`;
   }

@@ -3,6 +3,8 @@ import { spawn } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { userPath } from '../providers/cliAdapter';
+import { killTree, OWN_PROCESS_GROUP } from '../providers/processTree';
+import { SPAWN_AGENT_DESCRIPTION, SPAWN_AGENT_PARAMETERS, SPAWN_AGENT_TOOL } from '../agents/spawnSchema';
 
 export type AgentPermission = 'readonly' | 'edit' | 'write' | 'auto';
 
@@ -21,6 +23,8 @@ export interface ToolContext {
   cwd: string;
   mode: AgentPermission;
   signal: AbortSignal;
+  /** Runs `spawn_agent`; missing for subagents, which cannot start further ones. */
+  spawnAgent?: (input: Record<string, unknown>, signal: AbortSignal) => Promise<ToolResult>;
   /** Asked before a risky tool runs; false denies the call. */
   confirm?: (tool: ToolDef, input: Record<string, unknown>) => Promise<boolean>;
 }
@@ -158,6 +162,14 @@ export function toolsForMode(mode: AgentPermission): ToolDef[] {
   return all;
 }
 
+/** `spawn_agent` for API providers; the subagent's own rights are capped at the caller's. */
+export const SPAWN_AGENT_TOOL_DEF: ToolDef = {
+  name: SPAWN_AGENT_TOOL,
+  description: SPAWN_AGENT_DESCRIPTION,
+  parameters: SPAWN_AGENT_PARAMETERS as unknown as Record<string, unknown>,
+  kind: 'read'
+};
+
 /** Commands need a yes in `write` mode; edits are routine and `auto` trusts everything. */
 export function needsConfirmation(tool: ToolDef, mode: AgentPermission): boolean {
   return mode === 'write' && tool.risk === 'command';
@@ -197,6 +209,10 @@ export async function executeTool(
         return ok(glob(String(input.pattern ?? ''), ctx));
       case 'grep':
         return ok(grep(input, ctx));
+      case SPAWN_AGENT_TOOL:
+        return ctx.spawnAgent
+          ? await ctx.spawnAgent(input, ctx.signal)
+          : { output: 'Subagents cannot start further subagents.', isError: true };
       default:
         return { output: `Unknown tool ${tool.name}.`, isError: true };
     }
@@ -448,7 +464,8 @@ function runCommand(command: string, timeoutMs: unknown, ctx: ToolContext): Prom
     const child = spawn(shell[0], [...shell.slice(1), command], {
       cwd: ctx.cwd,
       env: { ...process.env, PATH: userPath() },
-      shell: process.platform === 'win32'
+      shell: process.platform === 'win32',
+      detached: OWN_PROCESS_GROUP
     });
     let stdout = '';
     let stderr = '';
@@ -478,12 +495,10 @@ function runCommand(command: string, timeoutMs: unknown, ctx: ToolContext): Prom
     };
     const killer = setTimeout(() => {
       timedOut = true;
-      child.kill('SIGTERM');
-      setTimeout(() => child.kill('SIGKILL'), 5000).unref();
+      killTree(child, 5000);
     }, timeout);
     const onAbort = () => {
-      timedOut = true;
-      child.kill('SIGTERM');
+      killTree(child);
       finish(null);
     };
     ctx.signal.addEventListener('abort', onAbort, { once: true });

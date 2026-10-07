@@ -1,5 +1,5 @@
 import { inlineText, readBase64 } from '../chat/attachments';
-import { executeTool, MAX_TOOL_ROUNDS, ToolContext, ToolDef, toolsForMode } from '../chat/localTools';
+import { executeTool, MAX_TOOL_ROUNDS, SPAWN_AGENT_TOOL_DEF, ToolContext, ToolDef, toolsForMode } from '../chat/localTools';
 import { AgentAdapter, AgentEvent, LocalToolsRequest, ModelDef, ProviderDef, SendRequest, TokenUsage } from '../types';
 import { t } from '../i18n';
 
@@ -98,11 +98,15 @@ export class HttpAdapter implements AgentAdapter {
     const local: LocalToolsRequest | undefined = req.localTools;
     const mode = local?.mode ?? 'readonly';
     const tools = toolsForMode(mode);
+    if (req.spawnAgent) {
+      tools.push(SPAWN_AGENT_TOOL_DEF);
+    }
     return {
       tools,
       cwd: req.cwd,
       mode,
       signal: req.signal,
+      spawnAgent: req.spawnAgent,
       confirm: local
         ? async (tool, input) => (await local.confirm(tool.name, input)) !== false
         : undefined
@@ -384,7 +388,7 @@ async function runCalls(
   emit: (event: AgentEvent) => void,
   sink: (result: { id: string; output: string; isError: boolean }) => void
 ): Promise<void> {
-  for (const call of calls) {
+  const run = async (call: { id: string; name: string; args: string }) => {
     const input = parseArgs(call.args);
     emit({ type: 'tool_start', id: call.id, name: call.name, input });
     const tool = ctx.tools.find((candidate) => candidate.name === call.name);
@@ -393,7 +397,18 @@ async function runCalls(
       : { output: `Unknown tool "${call.name}". Available: ${ctx.tools.map((t) => t.name).join(', ')}.`, isError: true };
     emit({ type: 'tool_end', id: call.id, name: call.name, output: result.output, isError: result.isError });
     sink({ id: call.id, output: result.output, isError: result.isError });
+  };
+  // Subagents of one round run side by side; everything else stays in order.
+  const subagents = calls.filter((call) => call.name === SPAWN_AGENT_TOOL_DEF.name).map(run);
+  for (const call of calls) {
+    if (ctx.signal.aborted) {
+      break; // stopped: the turn ends before the next round anyway
+    }
+    if (call.name !== SPAWN_AGENT_TOOL_DEF.name) {
+      await run(call);
+    }
   }
+  await Promise.all(subagents);
 }
 
 /** Tool arguments arrive as a streamed JSON string; broken ones must not kill the turn. */

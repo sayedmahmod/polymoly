@@ -114,7 +114,15 @@ export interface ProviderDef {
 
 /** MCP server shared by every provider that can load MCP servers. */
 export type McpServerDef =
-  | { type?: 'stdio'; command: string; args?: string[]; env?: Record<string, string>; disabled?: boolean }
+  | {
+      type?: 'stdio';
+      command: string;
+      args?: string[];
+      env?: Record<string, string>;
+      disabled?: boolean;
+      /** How long codex waits for one tool call; its default is 60 s. */
+      toolTimeoutSec?: number;
+    }
   | { type: 'http' | 'sse'; url: string; headers?: Record<string, string>; disabled?: boolean };
 
 /** One subscription window, normalised across providers. */
@@ -211,6 +219,8 @@ export interface SendRequest {
   skillsDir?: string;
   /** Local file/shell tools for HTTP providers; CLI agents bring their own. */
   localTools?: LocalToolsRequest;
+  /** Starts a subagent from an HTTP provider's `spawn_agent` tool; CLI agents get it over MCP. */
+  spawnAgent?: (input: Record<string, unknown>, signal: AbortSignal) => Promise<{ output: string; isError: boolean }>;
   signal: AbortSignal;
 }
 
